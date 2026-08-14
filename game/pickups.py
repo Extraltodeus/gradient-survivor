@@ -13,7 +13,19 @@ class Pickup:
 	def __init__(self): self.dead = True
 
 
-def drop(w, kind, x, y, val=1):
+CHEST_GAP = 11.0        # minimum seconds between two caches entering the world
+
+
+def drop(w, kind, x, y, val=1, force=False):
+	if kind == 'chest' and not force:
+		# Caches feed power, power feeds kills, kills feed caches. Rate-limit the
+		# loop or it runs away: without this it compounds into hundreds per minute.
+		if w.t - w.last_chest < CHEST_GAP:
+			kind = 'xp'; val = 20 + int(w.director.tier * 6)
+		else:
+			w.last_chest = w.t
+	elif kind == 'chest':
+		w.last_chest = w.t
 	p = w.pick_pool.pop() if w.pick_pool else Pickup()
 	p.kind = kind; p.x = x; p.y = y; p.val = val
 	a = w.rng.random() * TAU
@@ -106,12 +118,13 @@ def collect(w, p):
 		w.audio.play('heal', 0.8)
 		w.fx.wave(pl.x, pl.y, 6, 44, 0.35, HP_COL, 3)
 	elif k == 'chest':
-		n = 1 + (1 if w.rng.random() < 0.45 + pl.luck else 0) + (1 if w.rng.random() < 0.18 + pl.luck * 0.5 else 0)
-		pl.banked += n
+		# Caches install themselves. They used to queue up level-up screens, which
+		# meant packs of caches buried the player in menus instead of gameplay.
+		n = 1 + (1 if w.rng.random() < 0.30 + pl.luck * 0.6 else 0)
 		w.audio.play('evolve', 0.8)
 		w.fx.wave(pl.x, pl.y, 8, 130, 0.6, GOLD, 5)
 		w.fx.burst(pl.x, pl.y, 30, GOLD, 300, 0.8, 3.4)
-		w.banner('CACHE OPENED', '%d upgrade%s' % (n, 's' if n > 1 else ''), GOLD)
+		w.auto_upgrade(n)
 	elif k == 'bomb':
 		w.audio.play('bossdie', 0.9)
 		w.fx.screen_flash(ORANGE, 0.5)

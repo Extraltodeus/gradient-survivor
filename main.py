@@ -7,6 +7,35 @@ import pygame
 pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
 
+import core.settings as S
+
+
+def _pick_resolution(argv):
+	"""Render natively at the display resolution: this game is all vectors, so
+	there is no reason to draw small and upscale."""
+	want = None
+	for i, a in enumerate(argv):
+		if a == '--res' and i + 1 < len(argv):
+			try:
+				ww, hh = argv[i + 1].lower().split('x')
+				want = (int(ww), int(hh))
+			except Exception:
+				want = None
+	if want is None:
+		try:
+			dw, dh = pygame.display.get_desktop_sizes()[0]
+		except Exception:
+			dw, dh = 1280, 720
+		# cap the pixel budget: this is a CPU-side renderer
+		if dw * dh > 1920 * 1080:
+			k = (1920 * 1080 / float(dw * dh)) ** 0.5
+			dw, dh = int(dw * k) & ~1, int(dh * k) & ~1
+		want = (max(1024, dw), max(600, dh))
+	S.set_res(*want)
+
+
+_pick_resolution(sys.argv)
+
 from core.settings import *
 from core.utils import *
 from core.audio import Audio
@@ -52,6 +81,11 @@ class Game:
 		# SCALED lets SDL stretch the 1280x720 logical surface to any display while
 		# still reporting mouse positions in logical coordinates
 		self.screen = pygame.display.set_mode((W, H), self._flags(), vsync=0)
+		# the display may hand back something smaller than we asked for; adopt it
+		# before any game module is imported, since they star-import W/H
+		if self.screen.get_size() != (W, H):
+			S.set_res(*self.screen.get_size())
+			globals().update(W=S.W, H=S.H, CX=S.CX, CY=S.CY)
 		pygame.display.set_caption(TITLE + '  //  ' + SUBTITLE)
 		self.clock = pygame.time.Clock()
 
@@ -80,17 +114,22 @@ class Game:
 		self.mouse_anchor = None
 		self.mouse_fade = 0.0
 		self.mouse_last = (CX, CY)
-		self.opts = {'dmgnum': True, 'shake': 1.0, 'quality': 1.0, 'overlay': True, 'bloom': True}
+		# Bloom is a full-screen additive pass: ~12 ms at 1080p, ~5 ms at 720p. We
+		# render natively for a crisp fullscreen, so on big displays it starts off.
+		self.opts = {'dmgnum': True, 'shake': 1.0, 'quality': 1.0, 'overlay': True,
+		             'bloom': W * H <= 1500000}
 		self.slow_frames = 0
 
 	def _flags(self):
-		return pygame.SCALED | (pygame.FULLSCREEN if self.fullscreen else 0)
+		# no SCALED: we already render at display resolution, so fullscreen is 1:1
+		return pygame.FULLSCREEN if self.fullscreen else 0
 
 	def toggle_fullscreen(self):
 		self.fullscreen = not self.fullscreen
 		try:
-			pygame.display.toggle_fullscreen()
+			self.screen = pygame.display.set_mode((W, H), self._flags(), vsync=0)
 		except Exception:
+			self.fullscreen = not self.fullscreen
 			self.screen = pygame.display.set_mode((W, H), self._flags(), vsync=0)
 		self.save['fullscreen'] = self.fullscreen
 		save_data(self.save)
@@ -156,6 +195,10 @@ class Game:
 				if ev.key == pygame.K_F2:
 					self.opts['bloom'] = not self.opts['bloom']
 					self.slow_frames = 0
+					if self.world:
+						self.world.banner('BLOOM ' + ('ON' if self.opts['bloom'] else 'OFF'),
+						                  'F2 toggles - costs ~%d ms/frame' % (12 if W * H > 1500000 else 5),
+						                  CYAN)
 					continue
 				if ev.key == pygame.K_F4:
 					self.opts['overlay'] = not self.opts['overlay']
@@ -279,7 +322,7 @@ class Game:
 			if f > 5:
 				w.fx.quality = clamp(w.fx.quality + (0.35 if f > 56 else -0.6) * dt, 0.28, 1.0)
 				# bloom is the first thing to go if the frame budget slips
-				if f < 46:
+				if f < 52:
 					self.slow_frames += 1
 					if self.slow_frames > 140 and self.opts['bloom']:
 						self.opts['bloom'] = False

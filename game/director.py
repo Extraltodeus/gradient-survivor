@@ -103,7 +103,7 @@ class Director:
 		# ---- crates
 		self.crate_t -= dt
 		if self.crate_t <= 0.0:
-			self.crate_t = 42.0 + self.rng.uniform(-8, 8)
+			self.crate_t = 46.0 + self.rng.uniform(-9, 9)
 			pl = w.player
 			a = self.rng.random() * TAU
 			d = self.rng.uniform(320, 600)
@@ -209,11 +209,11 @@ class Director:
 			e.name = 'HUNTER ' + e.name
 			w.banner('HUNTER', 'it is looking for you specifically', RED)
 		elif name == 'crates':
-			for i in range(3):
+			for i in range(2):
 				a = rng.random() * TAU
 				d = rng.uniform(280, 520)
 				drop(w, 'chest', pl.x + math.cos(a) * d, pl.y + math.sin(a) * d)
-			w.banner('CACHES FOUND', 'three of them, nearby', GOLD)
+			w.banner('CACHES FOUND', 'two of them, nearby', GOLD)
 		elif name == 'gauntlet':
 			w.hazard_ring(pl.x, pl.y, 620.0, 150.0, 6.5, self.biome['accent'], 12.0 * self.dmg_mult)
 			for i in range(int(16 + 6 * m)):

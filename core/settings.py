@@ -6,6 +6,13 @@ VERSION   = "1.0"
 
 W, H      = 1280, 720
 CX, CY    = W // 2, H // 2
+
+def set_res(w, h):
+	"""Set the render resolution. Must be called before importing game.* so the
+	star-imports in those modules capture the final values."""
+	global W, H, CX, CY
+	W, H = int(w), int(h)
+	CX, CY = W // 2, H // 2
 FPS       = 60
 
 # ---- fonts -------------------------------------------------------------
@@ -56,5 +63,12 @@ MAX_PROCESSES = 6
 MAX_TRAIT_RK  = 5
 
 def xp_for_level(n):
-	# gentle early, steeper later; keeps the level-up drumbeat frequent but slowing
-	return int(4 + n * 3.4 + (n ** 1.62) * 0.9)
+	# Fast first few levels, then a firm quadratic so the mid game is played and
+	# not spent in menus. Roughly: lv10 by 2min, lv20 by 5min, lv40 by 12min.
+	# The cubic term matters: late-game kill rate grows explosively, and without it
+	# incoming XP outruns the curve and the run becomes a slideshow of menus.
+	# TUNING: this is the level-up pace dial. Lower the 2.18 / 0.052 coefficients
+	# for faster levelling, raise them for slower. Measured effect is modest though
+	# -- pace is dominated by kill rate, so CHEST_GAP in pickups.py (how often a
+	# cache auto-installs an upgrade) moves power without adding interruptions.
+	return int(5 + n * 4.0 + (n ** 1.94) * 2.18 + (n ** 2.79) * 0.052)

@@ -49,6 +49,7 @@ class World:
 		self.arcs = []
 		self.timers = []
 		self.banners = []
+		self.toasts = []
 		self.grid = SpatialHash(CELL)
 		self.player = Player(self)
 		self.boot = boot
@@ -67,6 +68,7 @@ class World:
 		self.glitch_t = 0.0
 		self.win = False
 		self.last_cam = (self.camx, self.camy)
+		self.last_chest = -99.0
 		self.stats = {'kills': 0, 'dmg': 0.0, 'taken': 0.0, 'xp': 0.0, 'evos': 0, 'fuses': 0}
 		self.evo_log = []
 		self.backdrop.set_biome(self.level)
@@ -92,6 +94,36 @@ class World:
 		b.title = title; b.sub = sub; b.col = col; b.life = b.max = 3.0
 		self.banners.append(b)
 		if len(self.banners) > 2: self.banners.pop(0)
+
+	def auto_upgrade(self, n=1):
+		"""Apply upgrades without stopping play: pick whatever fits the build best."""
+		from game.offers import build_offers
+		got = []
+		for _ in range(n):
+			offers = build_offers(self, 6)
+			if not offers: break
+			def score(o):
+				s = 0.0
+				if o.note and 'EVOLVES' in o.note: s += 100.0
+				elif o.note and 'SYNERGY' in o.note: s += 55.0
+				elif o.note and 'toward' in o.note: s += 26.0
+				s += {'op': 12.0, 'fuse': 9.0, 'rank': 6.0, 'new': 8.0, 'passive': 7.0}.get(o.kind, 4.0)
+				s += o.rarity * 3.0
+				return s + self.rng.random() * 6.0
+			o = max(offers, key=score)
+			o.apply()
+			got.append(o)
+		if got:
+			names = ' + '.join(o.title for o in got)
+			sub = got[0].sub if len(got) == 1 else 'installed'
+			self.banner('CACHE: ' + names, sub, GOLD)
+			self.toast(got)
+		return got
+
+	def toast(self, offers):
+		for o in offers:
+			self.toasts.append([o.glyph, o.title, o.sub, o.col, 3.4, 3.4])
+		if len(self.toasts) > 4: self.toasts = self.toasts[-4:]
 
 	def fx_arc(self, x0, y0, x1, y1, col):
 		a = Arc()
@@ -245,8 +277,8 @@ class World:
 			boss_death_extra(self, e)
 			self.boss = None
 			self.director.boss_alive = False
-			for i in range(3):
-				drop(self, 'chest', e.x + rng.uniform(-40, 40), e.y + rng.uniform(-40, 40))
+			self.player.banked += 1          # the boss reward is a real, chosen upgrade
+			drop(self, 'chest', e.x + rng.uniform(-40, 40), e.y + rng.uniform(-40, 40), 1, True)
 			drop(self, 'hp', e.x, e.y, 45)
 			for i in range(26):
 				drop(self, 'xp', e.x + rng.uniform(-70, 70), e.y + rng.uniform(-70, 70), 12)
@@ -262,7 +294,7 @@ class World:
 			drop(self, 'xp', e.x, e.y, e.xp)
 		r = rng.random()
 		if e.elite:
-			if r < 0.55 + luck: drop(self, 'chest', e.x, e.y)
+			if r < 0.30 + luck * 0.5: drop(self, 'chest', e.x, e.y)
 			elif r < 0.8: drop(self, 'hp', e.x, e.y, 25)
 			else: drop(self, 'bomb', e.x, e.y)
 		else:
@@ -337,6 +369,9 @@ class World:
 			if a.life > 0.0: alive.append(a)
 		self.arcs = alive
 		alive = []
+		for t_ in self.toasts:
+			t_[4] -= dt
+		self.toasts = [t_ for t_ in self.toasts if t_[4] > 0.0]
 		for b in self.banners:
 			b.life -= dt
 			if b.life > 0.0: alive.append(b)
