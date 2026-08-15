@@ -2,7 +2,7 @@
 
 # GRADIENT DESCENT
 
-**an AI survivor**
+**an AI survivor (made by Claude Opus 5)**
 
 *You are the model. They are the data. Survive the training run.*
 
