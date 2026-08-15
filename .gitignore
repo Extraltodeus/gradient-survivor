@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 save.json
 shots/
+build/
+misc/
+dist/
+GradientDescent.spec
