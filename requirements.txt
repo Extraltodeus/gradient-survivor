@@ -1,0 +1,7 @@
+# Everything the game needs to run. Nothing else: no assets are loaded, no
+# codecs, no network.
+pygame>=2.1
+numpy>=1.21
+
+# Only to produce the portable executable (tools/build.py):
+#   pip install pyinstaller

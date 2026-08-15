@@ -99,6 +99,12 @@ class World:
 		self.player.iframe = max(self.player.iframe, 1.35)
 		self.trans_pending = True
 
+	def folding(self):
+		"""True from the moment a biome change is decided until its fold ends.
+		`trans_pending` matters: the Matmul itself is only built on the next draw,
+		and a level-up opening in that gap would eat the animation before it starts."""
+		return self.trans is not None or self.trans_pending
+
 	def banner(self, title, sub, col=INK):
 		for old in self.banners:
 			if old.title == title:          # don't stack duplicates, just refresh

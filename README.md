@@ -22,7 +22,11 @@ sound — including the soundtrack — is synthesised with numpy when the game b
 [Releases](../../releases). One file, ~34 MB, no install, no Python. Your save
 sits next to the exe, so it travels with it.
 
-**From source** — Python 3.10+, `pygame` and `numpy`:
+**From source** — Python 3.10+, two dependencies:
+
+```bash
+pip install -r requirements.txt
+```
 
 ```bash
 python main.py
@@ -189,6 +193,10 @@ read-only folder.
 | `tools/shots.py` | renders a screenshot of every screen |
 | `tools/audition.py` | renders the soundtrack to wav |
 | `tools/build.py` | the portable executable |
+
+## License
+
+[Apache License 2.0](LICENSE).
 
 ## Layout
 

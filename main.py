@@ -407,7 +407,9 @@ class Game:
 				self.end_run(False)
 			elif w.win:
 				self.end_run(True)
-			elif w.player.banked > 0 and w.fx.hitstop <= 0:
+			elif w.player.banked > 0 and w.fx.hitstop <= 0 and not w.folding():
+				# a biome fold owns the screen for 1.5s: let it finish before the
+				# upgrade screen takes over
 				self.open_levelup()
 		elif self.scene == 'levelup':
 			self.levelup.update(dt)
