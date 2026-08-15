@@ -29,16 +29,19 @@ def main():
 	ap.add_argument('--seed', type=int, default=7)
 	ap.add_argument('--draw', action='store_true')
 	ap.add_argument('--profile', action='store_true')
+	ap.add_argument('--pace', default='slow', help='slow | normal | fast | insanity')
 	a = ap.parse_args()
 
 	screen = pygame.display.set_mode((W, H))
 	from core.audio import Audio
+	from core.pace import get as get_pace
 	from game.world import World
 	from game.offers import build_offers
 	from game import ui
 
 	audio = Audio(); audio.muted = True
-	w = World(a.seed, {'dmgnum': True, 'shake': 1.0, 'quality': 1.0, 'bloom': True}, audio)
+	w = World(a.seed, {'dmgnum': True, 'shake': 1.0, 'quality': 1.0, 'bloom': True}, audio,
+	          None, get_pace(a.pace))
 	w.banned = set()
 	keys = FakeKeys()
 	rng = random.Random(a.seed)

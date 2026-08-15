@@ -16,6 +16,7 @@ CONTROLS = (
 	('ESC or P', 'pause / this screen'),
 	('1-4 or click', 'pick an upgrade'),
 	('R / X / TAB', 'reroll / banish / skip'),
+	('TAB (sandbox)', 'open the bench'),
 	('F11 or Alt+Enter', 'fullscreen'),
 	('F5', 'mouse mode: pointer or drag'),
 	('F2 / F4', 'bloom / scanlines'),
@@ -425,6 +426,9 @@ def draw_hud(w, s):
 	draw_text(s, 'LV %d' % pl.level, 10, 13, 17, INK, True)
 	tw = draw_text(s, d.time_str(), CX, 13, 21, INK, True, 'tc')[0]
 	draw_text(s, '%d kills' % w.stats['kills'], W - 10, 15, 15, INK_DIM, False, 'tr')
+	draw_text(s, w.pace['name'], CX + tw * 0.5 + 12, 18, 11, shade(w.pace['col'], 0.85), True)
+	if w.sandbox:
+		draw_text(s, 'LAB   TAB opens the bench', CX - tw * 0.5 - 12, 18, 11, VIOLET, True, 'tr')
 
 	# ---- biome tag
 	b = w.level
@@ -858,7 +862,8 @@ def draw_pause(w, s, tab=0):
 	y += 10
 	draw_text(s, 'RUN', x, y, 14, INK, True); y += 22
 	d = w.director
-	rows = [('time', d.time_str()), ('kills', str(w.stats['kills'])),
+	rows = [('schedule', w.pace['name']), ('time', d.time_str()), ('kills', str(w.stats['kills'])),
+	        ('dps', '%d' % w.dps),
 	        ('damage dealt', '%d' % w.stats['dmg']), ('damage taken', '%d' % w.stats['taken']),
 	        ('evolutions', str(w.stats['evos'])), ('fusions', str(w.stats['fuses'])),
 	        ('biome', w.level['name'])]
@@ -981,8 +986,47 @@ def draw_cursor(s, w, mx, my, held, mode, anchor, fade):
 
 
 # ============================================================ BOOT SELECT
-def draw_select(s, t, sel, boots):
+def draw_pace_strip(s, y, sel, t):
+	"""The four run schedules, as one clickable strip. Returns their rects."""
+	from core.pace import PACES
+	n = len(PACES)
+	cw = min(258, int((W - 80 - (n - 1) * 14) / n))
+	ch = 74
+	gap = 14
+	x0 = CX - (n * cw + (n - 1) * gap) * 0.5
+	rects = []
+	for i, p in enumerate(PACES):
+		x = int(x0 + i * (cw + gap))
+		r = pygame.Rect(x, int(y), cw, ch)
+		rects.append(r)
+		selq = i == sel
+		col = p['col']
+		surf = pygame.Surface((cw, ch), pygame.SRCALPHA)
+		pygame.draw.rect(surf, (12, 15, 23, 240), (0, 0, cw, ch), 0, 8)
+		if selq:
+			pygame.draw.rect(surf, (col[0] // 6, col[1] // 6, col[2] // 6, 255), (0, 0, cw, ch), 0, 8)
+		pygame.draw.rect(surf, col if selq else LINE, (0, 0, cw, ch), 2 if selq else 1, 8)
+		s.blit(surf, r.topleft)
+		if selq: blit_glow(s, r.centerx, r.centery, 120, shade(col, 0.5), 0.30)
+		draw_text(s, str(i + 1), r.x + 9, r.y + 7, 11, INK_FAINT, True)
+		draw_text(s, p['name'], r.centerx, r.y + 8, 17, col if selq else INK, True, 'tc')
+		draw_text(s, trim(p['tag'], int(cw / 6.2)), r.centerx, r.y + 30, 11, INK_DIM if selq else INK_FAINT,
+		          False, 'tc')
+		# speed pips
+		bw = 22; bh = 7
+		bx = r.centerx - (4 * bw + 3 * 5) * 0.5
+		for k in range(4):
+			on = k < p['bars']
+			c = col if on else (30, 36, 50)
+			if on and selq:
+				c = mix(col, WHITE, 0.35 * (0.5 + 0.5 * math.sin(t * 5.0 - k * 0.6)))
+			pygame.draw.rect(s, c, (int(bx + k * (bw + 5)), r.y + 52, bw, bh), 0, 2)
+	return rects
+
+
+def draw_select(s, t, sel, boots, pace_sel=0):
 	from game.weapons import BOOTS, E, O, PASSIVE_BY_ID
+	from core.pace import PACES
 	s.fill((5, 7, 12))
 	rng = random.Random(2)
 	for i in range(70):
@@ -990,9 +1034,10 @@ def draw_select(s, t, sel, boots):
 		f = 0.15 + 0.85 * abs(math.sin(t * 0.9 + i * 0.7))
 		pygame.draw.rect(s, shade((50, 110, 190), f * 0.35), (x, y, 2, 2))
 
-	draw_text(s, 'BOOT CONFIGURATION', CX, 46, 30, INK, True, 'tc')
-	draw_text(s, 'every process is a shell you will grow ops onto. pick your first one.',
-	          CX, 84, 13, INK_DIM, False, 'tc')
+	draw_text(s, 'BOOT CONFIGURATION', CX, 26, 28, INK, True, 'tc')
+	draw_text(s, 'TRAINING SCHEDULE   -   1-4 or click', CX, 62, 12, INK_FAINT, False, 'tc')
+	pace_rects = draw_pace_strip(s, 80, pace_sel, t)
+	draw_text(s, PACES[pace_sel]['desc'], CX, 160, 12, INK_DIM, False, 'tc')
 
 	n = len(boots)
 	cols = 3
@@ -1000,7 +1045,7 @@ def draw_select(s, t, sel, boots):
 	gapx, gapy = 26, 22
 	rows = (n + cols - 1) // cols
 	x0 = CX - (cols * cw + (cols - 1) * gapx) * 0.5
-	y0 = 132
+	y0 = 188
 	rects = []
 	for i, b in enumerate(boots):
 		cx_ = x0 + (i % cols) * (cw + gapx)
@@ -1034,8 +1079,8 @@ def draw_select(s, t, sel, boots):
 		p = PASSIVE_BY_ID[b['passive']]
 		draw_text(s, '+ ' + p['name'], r.x + 15, y + 17, 11, INK_FAINT)
 
-	draw_text(s, 'ARROWS choose    ENTER boot    ESC back', CX, H - 46, 13, CYAN, True, 'tc')
-	return rects
+	draw_text(s, 'ARROWS choose    1-4 schedule    ENTER boot    ESC back', CX, H - 40, 13, CYAN, True, 'tc')
+	return rects, pace_rects
 
 
 # ================================================================== MENUS
@@ -1072,8 +1117,10 @@ def draw_title(s, t, sel, items, hiscore):
 		y += 44
 
 	if hiscore:
-		draw_text(s, 'best: %s  -  lv %d  -  %d kills' % (hiscore.get('time', '0:00'),
-		          hiscore.get('level', 1), hiscore.get('kills', 0)), CX, H - 70, 13, INK_FAINT, False, 'tc')
+		draw_text(s, 'best: %s  -  lv %d  -  %d kills%s' % (hiscore.get('time', '0:00'),
+		          hiscore.get('level', 1), hiscore.get('kills', 0),
+		          '  -  ' + hiscore['pace'] if hiscore.get('pace') else ''),
+		          CX, H - 70, 13, INK_FAINT, False, 'tc')
 	draw_text(s, 'WASD or HOLD LEFT MOUSE to move   SPACE / RIGHT CLICK dash   ESC pause',
 	          CX, H - 42, 12, INK_FAINT, False, 'tc')
 	draw_text(s, 'F11 fullscreen   F5 mouse mode   F2 bloom   F3 fps   M mute       '
@@ -1098,7 +1145,7 @@ def draw_end(w, s, t, win):
 	x = CX - 300
 	y = 190
 	panel(s, (x - 20, y - 16, 640, 250), 200)
-	rows = [('survived', d.time_str()), ('level', str(w.player.level)),
+	rows = [('schedule', w.pace['name']), ('survived', d.time_str()), ('level', str(w.player.level)),
 	        ('kills', str(w.stats['kills'])), ('damage dealt', '%d' % w.stats['dmg']),
 	        ('damage taken', '%d' % w.stats['taken']),
 	        ('evolutions', str(w.stats['evos'])), ('fusions', str(w.stats['fuses'])),

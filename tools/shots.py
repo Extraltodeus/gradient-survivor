@@ -37,7 +37,8 @@ def main():
 	from main import make_overlay
 
 	audio = Audio(); audio.muted = True
-	overlay = make_overlay()
+	# main.py picks its own resolution at import time; force ours back on top of it
+	overlay = make_overlay(W, H)
 	rng = random.Random(a.seed)
 
 	# ---- title
@@ -110,10 +111,60 @@ def main():
 	ui.draw_hud(w, screen)
 	ui.draw_end(w, screen, 1.0, False)
 	pygame.image.save(screen, os.path.join(out, '05_end.png'))
-	print('saved to', out)
 	for p in w.arsenal.procs:
 		print('  ', p.name, '|', ','.join('%s%d' % (k, v) for k, v in p.ops.items()), '|', ','.join(p.syn))
 	print('evos:', w.evo_log)
+
+	# ------------------------------------------------------- boot + schedule
+	from game.weapons import BOOTS
+	ui.draw_select(screen, 2.2, 3, BOOTS, 2)
+	pygame.image.save(screen, os.path.join(out, '06_select.png'))
+
+	# ------------------------------------------------------------ biome tour
+	from core.pace import PACES
+	from game.levels import BIOMES
+	w2 = World(a.seed, {'dmgnum': True, 'shake': 0.0, 'quality': 1.0, 'bloom': True},
+	           audio, BOOTS[3], PACES[1])          # DESCENT: the loss field, for the halo
+	w2.player.area_mult = 2.1
+	w2.arsenal.procs[0].rank = 6
+	w2.arsenal.mark_dirty()
+	for bi, b in enumerate(BIOMES):
+		w2.director.biome = b
+		w2.director.recalc()
+		w2.enter_biome(b)
+		w2.trans = None; w2.trans_pending = False
+		for i in range(60 * 5):
+			w2.update(dt, keys)
+			if w2.player.dead: w2.player.dead = False; w2.player.hp = w2.player.maxhp
+		w2.draw(screen)
+		screen.blit(overlay, (0, 0))
+		ui.draw_hud(w2, screen)
+		pygame.image.save(screen, os.path.join(out, '07_biome_%d_%s.png' % (bi, b['id'])))
+		print('biome %-9s enemies %3d  field r=%.0f' % (b['id'], len(w2.enemies),
+		      max([p.r for p in w2.projs if p.kind == 'field'] or [0])))
+
+	# ---------------------------------------------------- the matmul fold
+	w2.director.advance_biome(w2)
+	for i in range(90):
+		w2.update(dt, keys)
+		w2.draw(screen)
+		ui.draw_hud(w2, screen)
+		if i in (8, 22, 40, 62):
+			pygame.image.save(screen, os.path.join(out, '08_matmul_%02d.png' % i))
+
+	# --------------------------------------------------------------- bench
+	from game.sandbox import Sandbox
+	w3 = World(a.seed, {'dmgnum': True, 'shake': 1.0, 'quality': 1.0, 'bloom': True},
+	           audio, BOOTS[0], PACES[2], True)
+	sb = Sandbox(w3)
+	for i in range(90): w3.update(dt, keys)
+	for tab in (1, 3):
+		sb.tab = tab
+		w3.draw(screen)
+		ui.draw_hud(w3, screen)
+		sb.draw(screen, w3)
+		pygame.image.save(screen, os.path.join(out, '09_bench_%d.png' % tab))
+	print('saved to', out)
 
 
 main()

@@ -504,16 +504,13 @@ def draw_projs(w, s, camx, camy):
 			pygame.draw.circle(s, WHITE, (int(x), int(y)), max(1, int(p.dr * 0.45)))
 			pygame.draw.circle(s, p.col, (int(x), int(y)), int(p.dr * 1.05), 2)
 		elif k == 'field':
-			# ring-forward, hollow centre: the agent must stay readable inside it
+			# rim-lit, empty centre: the agent has to stay readable standing inside it
 			r = int(p.r)
 			a = 1.0 - max(0.0, p.f1 / max(0.001, p.f2))
-			g = ring(r, p.col, 2, 120)
+			g = hollow_glow(r, p.col, 0.42 + 0.26 * (1.0 - a))
 			s.blit(g, (x - g.get_width() * 0.5, y - g.get_height() * 0.5), None, ADD)
-			g = ring(int(r * 0.93), shade(p.col, 0.45), 1, 70)
-			s.blit(g, (x - g.get_width() * 0.5, y - g.get_height() * 0.5), None, ADD)
-			pulse = int(6 + 10 * (1.0 - a))
-			g2 = disc(r, p.col, pulse)
-			s.blit(g2, (x - g2.get_width() * 0.5, y - g2.get_height() * 0.5), None, ADD)
+			pygame.draw.circle(s, shade(p.col, 0.9), (int(x), int(y)), r, 2)
+			pygame.draw.circle(s, shade(p.col, 0.22 + 0.35 * (1.0 - a)), (int(x), int(y)), int(r * 0.66), 1)
 			for i in range(8):
 				aa = t * 1.3 + i * TAU / 8 + p.seed
 				px = x + math.cos(aa) * r * 0.94; py = y + math.sin(aa) * r * 0.94

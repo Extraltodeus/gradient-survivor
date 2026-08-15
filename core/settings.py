@@ -67,8 +67,7 @@ def xp_for_level(n):
 	# not spent in menus. Roughly: lv10 by 2min, lv20 by 5min, lv40 by 12min.
 	# The cubic term matters: late-game kill rate grows explosively, and without it
 	# incoming XP outruns the curve and the run becomes a slideshow of menus.
-	# TUNING: this is the level-up pace dial. Lower the 2.18 / 0.052 coefficients
-	# for faster levelling, raise them for slower. Measured effect is modest though
-	# -- pace is dominated by kill rate, so CHEST_GAP in pickups.py (how often a
-	# cache auto-installs an upgrade) moves power without adding interruptions.
+	# This curve is the SLOW schedule and the baseline for every other one: the
+	# run pacing dials (xp gain, cache rate, biome length, pressure) all live in
+	# core/pace.py as multipliers on top of it. Change them there, not here.
 	return int(5 + n * 4.0 + (n ** 1.94) * 2.18 + (n ** 2.79) * 0.052)

@@ -4,13 +4,14 @@ import math, random
 import pygame
 from core.settings import *
 from core.utils import *
+from core.pace import get as get_pace
 from core.fx import FX
 from game.player import Player
 from game.weapons import Arsenal, Process, fire
 from game.projectiles import update_projs, draw_projs, new_proj
 from game.enemies import (update_enemies, draw_enemies, update_eprojs, draw_eprojs,
                           eshot, spawn, on_death_special, A)
-from game.pickups import update_pickups, draw_pickups, drop
+from game.pickups import update_pickups, draw_pickups, drop, CHEST_GAP
 from game.director import Director
 from game.levels import Backdrop, BIOMES
 from game.combat import enemies_in, damage_enemy
@@ -31,9 +32,12 @@ class Banner:
 
 
 class World:
-	def __init__(self, seed=None, opts=None, audio=None, boot=None):
+	def __init__(self, seed=None, opts=None, audio=None, boot=None, pace=None, sandbox=False):
 		self.rng = random.Random(seed if seed is not None else random.randrange(1 << 30))
 		self.seed = seed
+		self.pace = pace if isinstance(pace, dict) else get_pace(pace)
+		self.chest_gap = CHEST_GAP / self.pace['chest']
+		self.sandbox = sandbox
 		self.banned = set()
 		self.last_fuse_lv = -9
 		self.opts = opts or {'dmgnum': True, 'shake': 1.0, 'quality': 1.0}
@@ -58,22 +62,30 @@ class World:
 			self.arsenal.procs[0].add_op(boot['op'])
 			self.player.apply_passive(boot['passive'])
 			self.player.hp = self.player.maxhp
-		self.director = Director(self, seed)
+		self.player.pace_xp = self.pace['xp']
+		self.player.cd_mult *= self.pace['cd']
+		self.director = Director(self, seed, self.pace)
 		self.backdrop = Backdrop()
 		self.level = BIOMES[0]
 		self.camx = self.player.x - CX
 		self.camy = self.player.y - CY
 		self.boss = None
+		self.trans = None
+		self.trans_pending = False
 		self.freeze_t = 0.0
 		self.glitch_t = 0.0
 		self.win = False
 		self.last_cam = (self.camx, self.camy)
 		self.last_chest = -99.0
 		self.stats = {'kills': 0, 'dmg': 0.0, 'taken': 0.0, 'xp': 0.0, 'evos': 0, 'fuses': 0}
+		self.dps = 0.0
+		self._dmg_prev = 0.0
 		self.evo_log = []
 		self.backdrop.set_biome(self.level)
 		self.audio.set_music(self.level['music'])
 		self.banner(self.level['name'], self.level['sub'], self.level['accent'])
+		if self.pace['gift']:
+			self.auto_upgrade(self.pace['gift'])
 
 	# ------------------------------------------------------------- helpers
 	def enter_biome(self, b):
@@ -84,6 +96,9 @@ class World:
 		self.fx.screen_flash(shade(b['accent'], 0.55), 0.6)
 		self.banner(b['name'], b['sub'], b['accent'])
 		self.hazards.clear()
+		# the fold takes over the screen for a moment: do not get shot through it
+		self.player.iframe = max(self.player.iframe, 1.35)
+		self.trans_pending = True
 
 	def banner(self, title, sub, col=INK):
 		for old in self.banners:
@@ -189,6 +204,9 @@ class World:
 	def hazard_ring(self, x, y, r0, r1, ttl, col, dmg):
 		return self._hz('ring', x=x, y=y, r=r0, r1=r1, col=col, dmg=dmg, ttl=ttl)
 
+	def hazard_well(self, x, y, r, col, dmg, ttl, tele=0.8):
+		return self._hz('well', x=x, y=y, r=r, col=col, dmg=dmg, ttl=ttl, tele=tele)
+
 	def hazard_strike(self, x, y, r, col, dmg, tele=0.7):
 		return self._hz('strike', x=x, y=y, r=r, col=col, dmg=dmg, ttl=tele + 0.25, tele=tele)
 
@@ -223,6 +241,18 @@ class World:
 					qx = h.x + dx * t; qy = h.y + dy * t
 					if dist2(qx, qy, pl.x, pl.y) < (h.wid + P_RADIUS) ** 2:
 						pl.hurt(self, h.dmg)
+			elif k == 'well':
+				dx = h.x - pl.x; dy = h.y - pl.y
+				d = math.hypot(dx, dy)
+				if d < h.r:
+					f = (1.0 - d / h.r) ** 1.5
+					pl.x += dx / max(1.0, d) * 260.0 * f * dt
+					pl.y += dy / max(1.0, d) * 260.0 * f * dt
+					if d < h.r * 0.3: pl.hurt(self, h.dmg)
+				if self.rng.random() < dt * 16.0:
+					a = self.rng.random() * TAU
+					self.fx.part('dot', h.x + math.cos(a) * h.r, h.y + math.sin(a) * h.r,
+					             -math.cos(a) * h.r * 0.9, -math.sin(a) * h.r * 0.9, 0.9, 2.4, h.col, 0.0)
 			elif k == 'ring':
 				f = 1.0 - h.ttl / h.life0
 				rr = h.r + (h.r1 - h.r) * f
@@ -250,7 +280,7 @@ class World:
 					f = 1.0 - h.tele / max(0.01, h.tele0)
 					pygame.draw.circle(s, shade(h.col, 0.5), (int(x), int(y)), max(1, int(r * f)), 1)
 				else:
-					g = disc(r, h.col, 44)
+					g = soft_disc(r, h.col, 0.30)
 					s.blit(g, (x - g.get_width() * 0.5, y - g.get_height() * 0.5), None, pygame.BLEND_ADD)
 					pygame.draw.circle(s, shade(h.col, 0.9), (int(x), int(y)), r, 2)
 			elif k == 'beam':
@@ -261,6 +291,19 @@ class World:
 					pygame.draw.line(s, shade(h.col, 0.5), (x, y), (ex, ey), int(h.wid * 2))
 					pygame.draw.line(s, h.col, (x, y), (ex, ey), int(h.wid))
 					pygame.draw.line(s, WHITE, (x, y), (ex, ey), max(1, int(h.wid * 0.35)))
+			elif k == 'well':
+				r = int(h.r)
+				if tele:
+					pygame.draw.circle(s, col, (int(x), int(y)), r, 1)
+				else:
+					g = hollow_glow(r, h.col, 0.26)
+					s.blit(g, (x - g.get_width() * 0.5, y - g.get_height() * 0.5), None, pygame.BLEND_ADD)
+					for k_ in range(3):
+						a0 = t * 2.2 + h.seed + k_ * TAU / 3
+						pts = [(x + math.cos(a0 + i * 0.5) * r * (1.0 - i * 0.11),
+						        y + math.sin(a0 + i * 0.5) * r * (1.0 - i * 0.11)) for i in range(8)]
+						pygame.draw.lines(s, shade(h.col, 0.75), False, pts, 2)
+					blit_glow(s, x, y, 22, WHITE, 0.6)
 			elif k == 'ring':
 				f = 1.0 - h.ttl / h.life0
 				rr = int(h.r + (h.r1 - h.r) * f)
@@ -284,7 +327,9 @@ class World:
 				drop(self, 'xp', e.x + rng.uniform(-70, 70), e.y + rng.uniform(-70, 70), 12)
 			self.stats['kills'] += 1
 			bi = self.director.biome_index()
-			if self.director.biome['id'] == 'collapse' and self.director.endless == 0:
+			if self.sandbox:
+				self.director.advance_biome(self)
+			elif self.director.biome['id'] == 'collapse' and self.director.endless == 0:
 				self.win = True
 				self.director.next_biome_t = self.director.t + 999.0
 			else:
@@ -335,6 +380,8 @@ class World:
 		self.frame += 1
 		fx = self.fx
 		fx.update(dt)
+		if self.trans is not None and not self.trans.update(dt):
+			self.trans = None
 		if fx.hitstop > 0.0:
 			fx.hitstop -= dt
 			return
@@ -379,6 +426,10 @@ class World:
 
 		self.backdrop.update(dt)
 
+		d = self.stats['dmg'] - self._dmg_prev
+		self._dmg_prev = self.stats['dmg']
+		self.dps += (d / dt - self.dps) * min(1.0, dt * 1.6)
+
 		# camera: follow with a little lead in the direction of travel
 		tx = pl.x - CX + clamp(pl.vx * 0.18, -110, 110)
 		ty = pl.y - CY + clamp(pl.vy * 0.18, -110, 110)
@@ -397,8 +448,15 @@ class World:
 		s.blit(pygame.transform.smoothscale(small, (W, H)), (0, 0), None, pygame.BLEND_ADD)
 
 	def draw(self, s):
-		sx = self.fx.shake_x * self.opts.get('shake', 1.0)
-		sy = self.fx.shake_y * self.opts.get('shake', 1.0)
+		if self.trans_pending:
+			# `s` still holds the last frame of the biome we are leaving: that is the
+			# sheet we are about to lift into R^3
+			from game.transition import Matmul
+			self.trans_pending = False
+			self.trans = Matmul(s.copy(), self.level['accent'])
+		sk = self.opts.get('shake', 1.0) * self.pace['shake']
+		sx = self.fx.shake_x * sk
+		sy = self.fx.shake_y * sk
 		if self.glitch_t > 0.0:
 			sx += self.rng.uniform(-9, 9); sy += self.rng.uniform(-5, 5)
 		camx = self.camx + sx; camy = self.camy + sy
@@ -416,6 +474,7 @@ class World:
 		if self.opts.get('bloom'): self.bloom(s)
 		self.fx.draw_nums(s, camx, camy)
 		self.fx.draw_flash(s)
+		if self.trans is not None: self.trans.draw(s)
 		return camx, camy
 
 	def draw_arcs(self, s, camx, camy):

@@ -25,6 +25,8 @@ class Player:
 		self.hurt_flash = 0.0
 		self.trail_t = 0.0
 		self.banked = 0          # pending level-ups
+		self.pace_xp = 1.0       # run pacing: kept out of xp_mult so passives stay meaningful
+		self.god = False
 		self.rerolls = 2
 		self.banishes = 1
 		self.revives = 0
@@ -126,7 +128,7 @@ class Player:
 
 	# ---------------------------------------------------------------- damage
 	def hurt(self, w, amount, src=None):
-		if self.iframe > 0.0 or self.dead: return
+		if self.iframe > 0.0 or self.dead or self.god: return
 		if self.dodge > 0.0 and w.rng.random() < self.dodge:
 			w.fx.dmg(self.x, self.y - 20, 'PHASE', CYAN, False, 14)
 			self.iframe = 0.25
@@ -163,7 +165,7 @@ class Player:
 
 	# ------------------------------------------------------------------- xp
 	def add_xp(self, amount):
-		self.xp += amount * self.xp_mult
+		self.xp += amount * self.xp_mult * self.pace_xp
 		while self.xp >= self.xp_next:
 			self.xp -= self.xp_next
 			self.level += 1

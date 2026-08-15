@@ -13,8 +13,12 @@ g = M.Game()
 dt = 1.0 / 60.0
 
 
-def press(key):
-	pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key, mod=0, unicode=''))
+def press(key, mod=0):
+	pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key, mod=mod, unicode=''))
+
+
+def click(pos, button=1):
+	pygame.event.post(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=button))
 
 
 def step(n=1):
@@ -24,11 +28,19 @@ def step(n=1):
 		g.draw()
 
 
+def menu_pick(name):
+	"""Walk the title menu to `name` and press enter."""
+	g.scene = 'title'
+	while g.menu[g.sel] != name:
+		press(pygame.K_DOWN); step(1)
+	press(pygame.K_RETURN); step(2)
+
+
 print('scene:', g.scene)
 step(3)
-# codex: every tab
-press(pygame.K_DOWN); press(pygame.K_RETURN)
-step(2)
+
+# ---------------------------------------------------------------- codex
+menu_pick('CODEX')
 print('scene:', g.scene)
 for i in range(5):
 	press(pygame.K_RIGHT); step(2)
@@ -36,13 +48,15 @@ press(pygame.K_DOWN); press(pygame.K_DOWN); step(2)
 press(pygame.K_ESCAPE); step(2)
 print('scene:', g.scene)
 
-# start a run: menu -> boot select -> play
-press(pygame.K_UP); press(pygame.K_RETURN)
-step(2)
+# ------------------------------------------------------- boot select + pace
+menu_pick('START RUN')
+for k in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_TAB):
+	press(k); step(2)
+press(pygame.K_4); step(2)                  # insanity: fastest biome rotation
 press(pygame.K_RIGHT); press(pygame.K_DOWN); step(2)
 press(pygame.K_RETURN)
 step(2)
-print('scene:', g.scene, 'world?', g.world is not None)
+print('scene:', g.scene, 'world?', g.world is not None, 'pace:', g.world.pace['id'])
 
 seen = set()
 random.seed(3)
@@ -55,6 +69,7 @@ for i in range(60 * 60 * 7):
 		if i % 900 == 0:
 			press(pygame.K_ESCAPE)          # pause
 		if g.world and g.world.boss: seen.add('boss')
+		if g.world and g.world.trans is not None: seen.add('matmul')
 		if i % 240 == 0: press(pygame.K_SPACE)
 		if i % 300 == 17:
 			pygame.event.post(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(900, 300), button=1))
@@ -84,11 +99,37 @@ for i in range(60 * 60 * 7):
 	g.update(dt)
 	if i % 3 == 0: g.draw()
 
-print('scenes visited:', seen)
+print('scenes visited:', sorted(seen))
 if g.world:
 	w = g.world
 	print('t=%s lv=%d kills=%d enemies=%d projs=%d evos=%s'
 	      % (w.director.time_str(), w.player.level, w.stats['kills'], len(w.enemies),
 	         len(w.projs), w.evo_log))
 	print('biome:', w.level['name'])
+
+# ---------------------------------------------------------------- the bench
+press(pygame.K_ESCAPE); step(2)
+g.world = None
+menu_pick('SANDBOX')
+print('scene:', g.scene, 'sandbox?', g.sandbox is not None)
+sb = g.sandbox
+for tab in range(5):
+	press(pygame.K_1 + tab); step(2)
+	for r, _l, _fn, _c, _o in list(sb.buttons):
+		click(r.center); step(1)
+	for c in list(sb.cards)[:14]:
+		click(c[0].center, 1 if random.random() < 0.7 else 3)
+		step(1)
+	press(pygame.K_RETURN); press(pygame.K_DOWN); press(pygame.K_e); step(2)
+press(pygame.K_TAB); step(1)
+print('scene after TAB:', g.scene)
+for i in range(60 * 45):
+	if g.scene == 'levelup': press(pygame.K_RETURN)
+	elif g.scene == 'play' and i % 400 == 0: press(pygame.K_TAB)
+	elif g.scene == 'sandbox' and i % 400 == 200: press(pygame.K_TAB)
+	g.handle_events(dt); g.update(dt)
+	if i % 3 == 0: g.draw()
+print('bench: procs=%d lv=%d enemies=%d dps=%d biome=%s'
+      % (len(g.world.arsenal.procs), g.world.player.level, len(g.world.enemies),
+         int(g.world.dps), g.world.level['id']))
 print('OK')

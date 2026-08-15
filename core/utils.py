@@ -146,6 +146,50 @@ def ngon(sides, radius, color, width=0, rot=0.0):
 		_poly_cache[key] = s
 	return s
 
+_radial_cache = {}
+
+def _radial(radius, color, power, profile, key):
+	"""Additive disc whose brightness follows `profile(t)`, t = 0 centre .. 1 rim.
+
+	BLEND_ADD ignores the source alpha entirely, so a flat disc blitted at alpha 6
+	still adds its full colour to every pixel it covers -- which is exactly how a
+	big field ends up as an opaque slab over the player. The falloff has to live in
+	the pixels, so it is baked here once per (radius, colour, power) and cached."""
+	r = max(2, int(radius))
+	if r > 16: r = (r // 8) * 8
+	k = (key, r, color[0] >> 3, color[1] >> 3, color[2] >> 3, int(power * 10))
+	s = _radial_cache.get(k)
+	if s is not None: return s
+	s = pygame.Surface((r * 2 + 2, r * 2 + 2))
+	steps = min(r, 44)
+	c = r + 1
+	for i in range(steps, 0, -1):
+		t = i / steps
+		f = profile(t) * power
+		if f <= 0.002: continue
+		col = (clamp(int(color[0] * f), 0, 255), clamp(int(color[1] * f), 0, 255),
+		       clamp(int(color[2] * f), 0, 255))
+		pygame.draw.circle(s, col, (c, c), max(1, int(r * t)))
+	_radial_cache[k] = s
+	return s
+
+
+def _rim(t):
+	# nothing at all until the outer third, then a soft band up to the edge
+	f = (t - 0.66) * 2.94
+	return f * f if f > 0.0 else 0.0
+
+
+def hollow_glow(radius, color, power=0.55):
+	"""Rim-lit band of light with a completely clear centre: safe to stand in."""
+	return _radial(radius, color, power, _rim, 'h')
+
+
+def soft_disc(radius, color, power=0.34):
+	"""Filled wash that fades out toward the rim. Safe to blit additively."""
+	return _radial(radius, color, power, lambda t: (1.0 - t) ** 1.6 * 0.55 + 0.45 * (1.0 - t * t), 's')
+
+
 _glow_half = {}
 
 def glow_c(radius, color, power=1.0):

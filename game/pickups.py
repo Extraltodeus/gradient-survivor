@@ -20,7 +20,7 @@ def drop(w, kind, x, y, val=1, force=False):
 	if kind == 'chest' and not force:
 		# Caches feed power, power feeds kills, kills feed caches. Rate-limit the
 		# loop or it runs away: without this it compounds into hundreds per minute.
-		if w.t - w.last_chest < CHEST_GAP:
+		if w.t - w.last_chest < getattr(w, 'chest_gap', CHEST_GAP):
 			kind = 'xp'; val = 20 + int(w.director.tier * 6)
 		else:
 			w.last_chest = w.t

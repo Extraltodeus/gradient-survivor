@@ -39,8 +39,42 @@ _pick_resolution(sys.argv)
 from core.settings import *
 from core.utils import *
 from core.audio import Audio
+from core.pace import PACES, DEFAULT_PACE
 
-SAVE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'save.json')
+
+def _pace_index(pid):
+	for i, p in enumerate(PACES):
+		if p['id'] == pid: return i
+	return next(i for i, p in enumerate(PACES) if p['id'] == DEFAULT_PACE)
+
+def _here():
+	"""Where the program lives: next to the exe once frozen, else the source dir."""
+	if getattr(sys, 'frozen', False): return os.path.dirname(os.path.abspath(sys.executable))
+	return os.path.dirname(os.path.abspath(__file__))
+
+
+def asset(*parts):
+	"""A bundled read-only file. PyInstaller unpacks datas into _MEIPASS."""
+	return os.path.join(getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__))), *parts)
+
+
+def _save_path():
+	"""Portable first: the save sits beside the exe. If that folder is read-only
+	(a USB stick, Program Files, a zip run in place) fall back to APPDATA."""
+	p = os.path.join(_here(), 'save.json')
+	try:
+		with open(p, 'a'):
+			return p
+	except Exception:
+		d = os.path.join(os.environ.get('APPDATA') or os.path.expanduser('~'), 'GradientDescent')
+		try:
+			os.makedirs(d, exist_ok=True)
+		except Exception:
+			pass
+		return os.path.join(d, 'save.json')
+
+
+SAVE = _save_path()
 
 
 def load_save():
@@ -57,8 +91,9 @@ def save_data(d):
 		pass
 
 
-def make_overlay():
+def make_overlay(W=None, H=None):
 	"""Vignette + scanlines baked into one surface."""
+	W = W or S.W; H = H or S.H
 	o = pygame.Surface((W, H), pygame.SRCALPHA)
 	cx, cy = W * 0.5, H * 0.5
 	maxd = math.hypot(cx, cy)
@@ -90,6 +125,11 @@ class Game:
 		self.clock = pygame.time.Clock()
 
 		self.splash()
+		try:
+			ic = pygame.image.load(asset('misc', 'gradient.png'))
+			pygame.display.set_icon(pygame.transform.smoothscale(ic, (64, 64)))
+		except Exception:
+			pass
 		self.audio = Audio()
 		self.audio.muted = bool(self.save.get('mute'))
 		self.overlay = make_overlay()
@@ -97,10 +137,13 @@ class Game:
 		self.scene = 'title'
 		self.t = 0.0
 		self.sel = 0
-		self.menu = ['START RUN', 'CODEX', 'QUIT']
+		self.menu = ['START RUN', 'SANDBOX', 'CODEX', 'QUIT']
 		self.codex_page = 0
-		self.boot_sel = 0
+		self.boot_sel = self.save.get('boot_sel', 0)
+		self.pace_sel = _pace_index(self.save.get('pace'))
 		self.boot_rects = []
+		self.pace_rects = []
+		self.sandbox = None
 		self.codex_scroll = 0
 		self.codex_max = 0
 		self.world = None
@@ -159,15 +202,24 @@ class Game:
 		pygame.display.flip()
 
 	# ---------------------------------------------------------------- run
-	def start(self, seed=None, boot=None):
+	def start(self, seed=None, boot=None, sandbox=False):
 		from game.world import World
 		from game.weapons import BOOTS
 		if boot is None: boot = BOOTS[self.boot_sel]
-		self.world = World(seed, self.opts, self.audio, boot)
+		pace = PACES[self.pace_sel]
+		self.world = World(seed, self.opts, self.audio, boot, pace, sandbox)
 		self.world.banned = set()
 		self.scene = 'play'
 		self.levelup = None
 		self.end_t = 0.0
+		self.save['pace'] = pace['id']
+		self.save['boot_sel'] = self.boot_sel
+		if sandbox:
+			from game.sandbox import Sandbox
+			self.sandbox = Sandbox(self.world)
+			self.scene = 'sandbox'
+		else:
+			self.sandbox = None
 
 	def loop(self):
 		while True:
@@ -227,6 +279,7 @@ class Game:
 						self.audio.play('pick', 1.0)
 						m = self.menu[self.sel]
 						if m == 'START RUN': self.scene = 'select'
+						elif m == 'SANDBOX': self.start(sandbox=True)
 						elif m == 'CODEX': self.scene = 'codex'; self.codex_scroll = 0
 						else: return False
 					elif ev.key == pygame.K_ESCAPE:
@@ -236,7 +289,11 @@ class Game:
 				from game.weapons import BOOTS
 				if ev.type == pygame.KEYDOWN:
 					n = len(BOOTS)
-					if ev.key in (pygame.K_RIGHT, pygame.K_d):
+					if pygame.K_1 <= ev.key <= pygame.K_4:
+						self.pace_sel = ev.key - pygame.K_1; self.audio.play('gem', 0.6)
+					elif ev.key == pygame.K_TAB:
+						self.pace_sel = (self.pace_sel + 1) % len(PACES); self.audio.play('gem', 0.6)
+					elif ev.key in (pygame.K_RIGHT, pygame.K_d):
 						self.boot_sel = (self.boot_sel + 1) % n; self.audio.play('move', 0.7)
 					elif ev.key in (pygame.K_LEFT, pygame.K_a):
 						self.boot_sel = (self.boot_sel - 1) % n; self.audio.play('move', 0.7)
@@ -252,9 +309,13 @@ class Game:
 					for i, r in enumerate(self.boot_rects):
 						if r.collidepoint(ev.pos): self.boot_sel = i
 				elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-					for i, r in enumerate(self.boot_rects):
+					for i, r in enumerate(self.pace_rects):
 						if r.collidepoint(ev.pos):
-							self.boot_sel = i; self.audio.play('pick', 1.0); self.start(); break
+							self.pace_sel = i; self.audio.play('gem', 0.7); break
+					else:
+						for i, r in enumerate(self.boot_rects):
+							if r.collidepoint(ev.pos):
+								self.boot_sel = i; self.audio.play('pick', 1.0); self.start(); break
 
 			elif self.scene == 'codex':
 				if ev.type == pygame.KEYDOWN:
@@ -273,7 +334,9 @@ class Game:
 
 			elif self.scene == 'play':
 				if ev.type == pygame.KEYDOWN:
-					if ev.key == pygame.K_ESCAPE or ev.key == pygame.K_p:
+					if ev.key == pygame.K_TAB and self.sandbox is not None:
+						self.scene = 'sandbox'; self.mouse_held = False
+					elif ev.key == pygame.K_ESCAPE or ev.key == pygame.K_p:
 						self.scene = 'pause'
 					elif ev.key == pygame.K_SPACE:
 						self.world.player.try_dash(self.world)
@@ -288,12 +351,17 @@ class Game:
 					self.mouse_held = False
 					self.mouse_anchor = None
 
+			elif self.scene == 'sandbox':
+				self.mouse_held = False
+				if not self.sandbox.event(ev, self.world):
+					self.scene = 'play'
+
 			elif self.scene == 'pause':
 				self.mouse_held = False
 				if ev.type == pygame.KEYDOWN:
 					if ev.key in (pygame.K_ESCAPE, pygame.K_p): self.scene = 'play'
 					elif ev.key == pygame.K_q:
-						self.scene = 'title'; self.world = None
+						self.scene = 'title'; self.world = None; self.sandbox = None
 
 			elif self.scene == 'levelup':
 				self.levelup.event(ev, self.world)
@@ -343,6 +411,10 @@ class Game:
 				self.scene = 'play'
 				if self.world.player.banked > 0:
 					self.open_levelup()
+		elif self.scene == 'sandbox':
+			self.sandbox.update(dt)
+			self.world.fx.update(dt)
+			self.audio.update(dt, 0.25)
 		elif self.scene == 'end':
 			self.end_t += dt
 			self.audio.update(dt, 0.0)
@@ -368,12 +440,13 @@ class Game:
 			w.fx.screen_flash(RED, 0.8)
 		else:
 			self.audio.play('evolve', 1.0)
+		if w.sandbox: return          # a lab run is not a score
 		self.save['runs'] = self.save.get('runs', 0) + 1
 		best = self.save.get('best') or {}
 		if w.director.t > best.get('t', -1):
 			self.save['best'] = {'t': w.director.t, 'time': w.director.time_str(),
 			                     'level': w.player.level, 'kills': w.stats['kills'],
-			                     'win': win}
+			                     'win': win, 'pace': w.pace['name']}
 		save_data(self.save)
 
 	# --------------------------------------------------------------- draw
@@ -388,8 +461,8 @@ class Game:
 			self.codex_max = ui.draw_codex(s, self.codex_page, self.codex_scroll)
 		elif self.scene == 'select':
 			from game.weapons import BOOTS
-			self.boot_rects = ui.draw_select(s, self.t, self.boot_sel, BOOTS)
-		elif self.scene in ('play', 'pause', 'end') and self.world:
+			self.boot_rects, self.pace_rects = ui.draw_select(s, self.t, self.boot_sel, BOOTS, self.pace_sel)
+		elif self.scene in ('play', 'pause', 'end', 'sandbox') and self.world:
 			self.world.draw(s)
 			if self.opts['overlay']: s.blit(self.overlay, (0, 0))
 			ui.draw_hud(self.world, s)
@@ -397,6 +470,7 @@ class Game:
 				ui.draw_cursor(s, self.world, self.mouse_last[0], self.mouse_last[1],
 				               self.mouse_held, self.mouse_mode, self.mouse_anchor, self.mouse_fade)
 			if self.scene == 'pause': ui.draw_pause(self.world, s)
+			elif self.scene == 'sandbox': self.sandbox.draw(s, self.world)
 			elif self.scene == 'end': ui.draw_end(self.world, s, self.end_t, self.world.win)
 		elif self.scene == 'levelup':
 			self.levelup.draw(s, self.world)

@@ -4,6 +4,7 @@ import math, random
 import pygame
 from core.settings import *
 from core.utils import *
+from core.pace import PACE_BY_ID
 from game.levels import BIOMES
 from game.enemies import spawn, A
 from game.pickups import drop
@@ -13,20 +14,24 @@ BOSS_WINDOW = 8.0       # gap between the last spawn wave and the boss
 
 
 class Director:
-	def __init__(self, w, seed=0):
+	def __init__(self, w, seed=0, pace=None):
 		self.w = w
+		self.pace = pace or PACE_BY_ID['slow']
+		p = self.pace
 		self.t = 0.0
 		self.tier = 0
 		self.biome = BIOMES[0]
-		self.next_biome_t = BIOME_TIME
+		self.biome_time = BIOME_TIME / p['biome']
+		self.next_biome_t = self.biome_time
 		self.spawn_acc = 0.0
-		self.event_t = 26.0
+		self.event_t = 26.0 / p['events']
 		self.event_name = None
 		self.boss_pending = False
 		self.boss_alive = False
-		self.hazard_t = 8.0
-		self.crate_t = 34.0
+		self.hazard_t = 8.0 / p['hazard']
+		self.crate_t = 34.0 / p['chest']
 		self.endless = 0
+		self.paused = False      # the bench freezes spawning, events and biome pacing
 		self.rng = random.Random(seed or random.randrange(1 << 30))
 		self.pressure = 0.0
 		self.kills_recent = 0.0
@@ -34,15 +39,19 @@ class Director:
 
 	# ------------------------------------------------------------- scaling
 	def recalc(self):
-		m = self.t / 60.0
+		p = self.pace
+		# the difficulty clock runs on pace time, not wall time: a compressed run
+		# must ramp just as steeply per biome or the fast modes become a walk
+		m = self.t / 60.0 * p['clock']
 		bm = self.biome['mods']
 		endl = 1.0 + 0.55 * self.endless
-		self.hp_mult = (1.0 + 0.45 * m + 0.050 * (m ** 2.1)) * bm.get('hp', 1.0) * endl
-		self.spd_mult = min(1.34, 1.0 + 0.10 * (self.t / 300.0)) * bm.get('spd', 1.0)
-		self.dmg_mult = (1.0 + 0.5 * (self.t / 300.0) ** 1.2) * (1.0 + 0.3 * self.endless)
+		self.hp_mult = (1.0 + 0.45 * m + 0.050 * (m ** 2.1)) * bm.get('hp', 1.0) * endl * p['ehp']
+		self.spd_mult = min(1.34, 1.0 + 0.10 * (m / 5.0)) * bm.get('spd', 1.0)
+		self.dmg_mult = (1.0 + 0.5 * (m / 5.0) ** 1.2) * (1.0 + 0.3 * self.endless) * p['edmg']
 		self.boss_hp_mult = (1.0 + 0.30 * m) * endl
-		self.target_alive = min(MAX_ENEMIES, int((32 + 27 * m) * (1.0 + 0.4 * self.endless)))
-		self.max_rate = 10.0 + 24.0 * m
+		self.target_alive = min(MAX_ENEMIES, int((32 + 27 * m) * (1.0 + 0.4 * self.endless) * p['density']))
+		self.max_rate = (10.0 + 24.0 * m) * p['rate']
+		self.m = m
 
 	def biome_index(self):
 		return BIOMES.index(self.biome)
@@ -52,6 +61,9 @@ class Director:
 		self.t += dt
 		self.recalc()
 		self.kills_recent = max(0.0, self.kills_recent - dt * 3.0)
+		if self.paused:
+			self.pressure = clamp(len(w.enemies) / 60.0, 0.0, 1.0)
+			return
 
 		alive = len(w.enemies)
 		self.pressure = clamp(alive / max(20.0, self.target_alive * 0.8), 0.0, 1.0) * 0.6 \
@@ -89,7 +101,7 @@ class Director:
 		# ---- events
 		self.event_t -= dt
 		if self.event_t <= 0.0 and not self.boss_alive:
-			self.event_t = max(26.0, 52.0 - self.t / 40.0) + self.rng.uniform(-5, 5)
+			self.event_t = (max(26.0, 52.0 - self.t / 40.0) + self.rng.uniform(-5, 5)) / self.pace['events']
 			self.run_event(w)
 
 		# ---- ambient hazards
@@ -97,13 +109,13 @@ class Director:
 		if hz:
 			self.hazard_t -= dt
 			if self.hazard_t <= 0.0:
-				self.hazard_t = max(2.6, 7.5 - self.t / 260.0) + self.rng.uniform(-1, 1)
+				self.hazard_t = (max(2.6, 7.5 - self.m / 4.3) + self.rng.uniform(-1, 1)) / self.pace['hazard']
 				self.ambient_hazard(w, hz)
 
 		# ---- crates
 		self.crate_t -= dt
 		if self.crate_t <= 0.0:
-			self.crate_t = 46.0 + self.rng.uniform(-9, 9)
+			self.crate_t = (46.0 + self.rng.uniform(-9, 9)) / self.pace['chest']
 			pl = w.player
 			a = self.rng.random() * TAU
 			d = self.rng.uniform(320, 600)
@@ -119,13 +131,13 @@ class Director:
 			self.endless += 1
 			self.tier += 1
 			self.biome = BIOMES[self.rng.randrange(len(BIOMES))]
-		self.next_biome_t = self.t + BIOME_TIME
+		self.next_biome_t = self.t + self.biome_time
 		w.enter_biome(self.biome)
 		self.recalc()
 
 	# ---------------------------------------------------------------- spawns
 	def pool_weights(self):
-		m = self.t / 60.0
+		m = self.m
 		out = []
 		for k in self.biome['pool']:
 			c = A[k]['cost']
@@ -144,7 +156,7 @@ class Director:
 	def spawn_one(self, w, kind=None, elite=None):
 		k = kind or weighted(self.rng, self.pool_weights())
 		if elite is None:
-			p = 0.005 + 0.0022 * (self.t / 60.0) + 0.005 * self.tier
+			p = 0.005 + 0.0022 * self.m + 0.005 * self.tier
 			elite = self.rng.random() < p
 		x, y = self.spawn_pos(w)
 		return spawn(w, k, x, y, elite)
@@ -164,7 +176,7 @@ class Director:
 
 	# ---------------------------------------------------------------- events
 	def run_event(self, w):
-		m = self.t / 60.0
+		m = self.m
 		opts = [('swarm', 1.0), ('tide', 0.9), ('crates', 0.5)]
 		if m > 1.5: opts += [('elites', 0.9), ('hunter', 0.7)]
 		if m > 4.0: opts += [('gauntlet', 0.8), ('siege', 0.7)]
@@ -246,6 +258,12 @@ class Director:
 				d = rng.uniform(120, 460)
 				w.hazard_pool(pl.x + math.cos(a) * d, pl.y + math.sin(a) * d, rng.uniform(60, 110),
 				              (255, 120, 50), 9.0 * self.dmg_mult, 5.0, tele=1.0)
+		elif hz == 'well':
+			for i in range(1 + self.tier // 3):
+				a = rng.random() * TAU
+				d = rng.uniform(170, 460)
+				w.hazard_well(pl.x + math.cos(a) * d, pl.y + math.sin(a) * d,
+				              rng.uniform(95, 155), (200, 150, 255), 7.0 * self.dmg_mult, 5.5)
 		elif hz == 'glitch':
 			for i in range(3):
 				a = rng.random() * TAU
@@ -261,4 +279,4 @@ class Director:
 		return '%d:%02d' % (m, s)
 
 	def biome_progress(self):
-		return clamp(1.0 - (self.next_biome_t - self.t) / BIOME_TIME, 0.0, 1.0)
+		return clamp(1.0 - (self.next_biome_t - self.t) / self.biome_time, 0.0, 1.0)
