@@ -446,9 +446,12 @@ class Audio:
 			if bar in (3, 7) and i16 >= 8: semi += 12       # lift into the turnaround
 			self.note(v_bass, root + semi - (12 if self.boss else 0), 0.88)
 
-		# --- arp: chord tones, wandering octave, comes in once things move
+		# --- arp: chord tones, wandering octave, comes in once things move.
+		# A pattern can hand back the bars it wants silent -- that is arrangement,
+		# and it is the only way a melody gets room to be heard.
 		ap = p.get('arp')
-		if ap and inten > 0.10:
+		ab = p.get('arp_bars')
+		if ap and inten > 0.10 and (ab is None or ab[bar16 % len(ab)]):
 			v = ap[st % len(ap)]
 			if v >= 0:
 				n = len(tones)
@@ -456,7 +459,9 @@ class Audio:
 				self.note(v_arp, root + 12 + semi, 0.22 + 0.30 * inten)
 
 		# --- lead: only on the bars that call for it, so it stays a melody
-		if p.get('always_lead') or self.boss or (inten > 0.42 and _LEAD_BARS[bar16]) or inten > 0.85:
+		lb = p.get('lead_bars', _LEAD_BARS)
+		if p.get('always_lead') or self.boss \
+		   or (inten > p.get('lead_at', 0.42) and lb[bar16 % len(lb)]) or inten > 0.85:
 			lp = p['lead']
 			v = lp[st % len(lp)]
 			if v >= 0:

@@ -612,8 +612,11 @@ class LevelUp:
 				self.reroll(w)
 			elif ev.key == pygame.K_x:
 				self.banish(w)
-			elif ev.key == pygame.K_TAB:
+			elif ev.key in (pygame.K_TAB, pygame.K_ESCAPE):
 				self.skip(w)
+		elif ev.type == pygame.MOUSEWHEEL and ev.y:
+			self.sel = (self.sel - ev.y) % len(self.offers)
+			w.audio.play('move', 0.5)
 		elif ev.type == pygame.MOUSEMOTION:
 			for i, r in enumerate(self.rects):
 				if r.collidepoint(ev.pos):
@@ -695,7 +698,7 @@ class LevelUp:
 		items = [('ENTER / CLICK', 'take', INK_FAINT if dim else INK),
 		         ('R', 'reroll (%d)' % pl.rerolls, INK_FAINT if dim else (GOLD if pl.rerolls else INK_FAINT)),
 		         ('X', 'banish (%d)' % pl.banishes, INK_FAINT if dim else (VIOLET if pl.banishes else INK_FAINT)),
-		         ('TAB', 'skip +12 hp', INK_DIM)]
+		         ('TAB / ESC', 'skip +12 hp', INK_DIM)]
 		tw = sum(text_w(a + '  ' + b, 13) + 34 for a, b in [(a, b) for a, b, _ in items])
 		fx_ = CX - tw * 0.5
 		for key, lbl, col in items:

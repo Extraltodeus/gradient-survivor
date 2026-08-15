@@ -30,20 +30,33 @@ BIOMES = [
 	_biome(id='dataset', name='THE DATASET', sub='epoch 1 // clean, labelled, harmless',
 	       bg=(6, 10, 19), grid=(18, 33, 56), accent=(63, 169, 245), dust=(120, 175, 235),
 	       pool=('null', 'bug', 'spam', 'mite'), boss='overseer',
-	       # the first biome is the one you hear most, so nothing here repeats on a
-	       # one bar cycle: eight chords, two bar rhythm parts, a four bar melody
-	       music=dict(bpm=102, root=9, scale=(0, 3, 5, 7, 10), prog=(0, 3, 1, 4, 0, 3, 2, 4),
-	                  voices=('sub', 'pluck', 'lead', 'warm'), swing=0.14,
-	                  bass=(0, -1, -1, 0, -1, -1, 4, -1, 0, -1, -1, 0, -1, 2, -1, -1,
-	                        0, -1, -1, 0, -1, -1, 2, -1, 4, -1, -1, 0, -1, -1, 2, -1),
-	                  arp=(0, 2, 1, 3, 0, 2, 4, 2, 1, 3, 2, 4, 0, 2, 1, -1,
-	                       2, 0, 3, 1, 4, 2, 3, 1, 0, 3, 2, 4, 1, 2, 0, -1),
-	                  lead=(-1, -1, 4, -1, 5, -1, 7, -1, -1, 5, -1, 4, -1, 2, -1, -1,
-	                        -1, -1, 7, -1, 9, -1, 7, 5, -1, 4, -1, 5, -1, -1, -1, -1,
-	                        -1, 2, -1, 4, -1, 5, -1, -1, 7, -1, 9, -1, 7, -1, 5, -1,
-	                        -1, 4, -1, 2, -1, -1, 4, -1, 5, 7, -1, 5, 4, -1, 2, -1),
-	                  drums=(1, 0, 2, 0, 4, 0, 2, 8, 1, 0, 2, 0, 4, 0, 2, 2,
-	                         1, 0, 2, 2, 4, 0, 2, 0, 1, 2, 2, 0, 4, 0, 2, 10))),
+	       # This is the biome you hear most, so it is written as a piece rather than
+	       # as patterns. Full A natural minor instead of a pentatonic, so the chords
+	       # are real triads with sevenths and a cadence can actually land:
+	       #   i  VI  III  VII  |  i  VI  iv  v
+	       # The lead is one eight bar sentence -- a two bar motif, restated at bar 5
+	       # and answered by a descent -- and the arp steps aside on the cadence bars
+	       # so the melody is never doubled. Everything is spaced in eighths: the lead
+	       # voice rings for 0.6s, which is exactly one eighth here, so notes sing
+	       # instead of piling up.
+	       music=dict(bpm=100, root=9, scale=(0, 2, 3, 5, 7, 8, 10), prog=(0, 5, 2, 6, 0, 5, 3, 4),
+	                  voices=('sub', 'pluck', 'lead', 'warm'), swing=0.08,
+	                  lead_at=0.16, lead_bars=(1, 1, 1, 1, 1, 1, 1, 1),
+	                  arp_bars=(1, 1, 1, 0, 1, 1, 1, 0),
+	                  bass=(0, -1, -1, -1, -1, -1, 0, -1, -1, -1, 4, -1, -1, -1, -1, -1,
+	                        0, -1, -1, -1, -1, -1, 0, -1, -1, -1, 7, -1, -1, 4, -1, -1),
+	                  arp=(-1, -1, 2, -1, -1, -1, -1, -1, 1, -1, -1, -1, -1, 3, -1, -1,
+	                       -1, -1, 2, -1, -1, -1, 4, -1, -1, -1, 1, -1, 2, -1, -1, -1),
+	                  lead=(-1, -1, -1, -1, 0, -1, -1, -1, 2, -1, -1, -1, 4, -1, -1, -1,
+	                        3, -1, -1, -1, -1, -1, -1, -1, 2, -1, -1, -1, -1, -1, -1, -1,
+	                        4, -1, -1, -1, 6, -1, -1, -1, 4, -1, -1, -1, -1, -1, -1, -1,
+	                        3, -1, -1, -1, -1, -1, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	                        -1, -1, -1, -1, 0, -1, -1, -1, 2, -1, -1, -1, 4, -1, -1, -1,
+	                        3, -1, -1, -1, -1, -1, -1, -1, 2, -1, 4, -1, -1, -1, -1, -1,
+	                        5, -1, -1, -1, 4, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1,
+	                        2, -1, -1, -1, 1, -1, -1, -1, 0, -1, -1, -1, -1, -1, -1, -1),
+	                  drums=(1, 0, 2, 0, 4, 0, 2, 0, 1, 0, 2, 0, 4, 0, 2, 8,
+	                         1, 0, 2, 0, 4, 0, 2, 2, 1, 0, 2, 0, 4, 0, 4, 2))),
 
 	_biome(id='latent', name='THE LATENT SPACE', sub='epoch 2 // nothing here has a name',
 	       bg=(10, 6, 21), grid=(40, 22, 66), accent=(180, 92, 255), dust=(205, 155, 255),

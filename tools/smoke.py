@@ -21,6 +21,10 @@ def click(pos, button=1):
 	pygame.event.post(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=button))
 
 
+def wheel(y=1):
+	pygame.event.post(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=y, flipped=False, which=0))
+
+
 def step(n=1):
 	for _ in range(n):
 		g.handle_events(dt)
@@ -38,6 +42,9 @@ def menu_pick(name):
 
 print('scene:', g.scene)
 step(3)
+for y in (1, -1, 2):                    # wheel navigation on the title menu
+	wheel(y); step(1)
+print('title sel after wheel:', g.sel)
 
 # ---------------------------------------------------------------- codex
 menu_pick('CODEX')
@@ -53,6 +60,7 @@ menu_pick('START RUN')
 for k in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_TAB):
 	press(k); step(2)
 press(pygame.K_4); step(2)                  # insanity: fastest biome rotation
+wheel(1); wheel(-1); step(2)
 press(pygame.K_RIGHT); press(pygame.K_DOWN); step(2)
 press(pygame.K_RETURN)
 step(2)
@@ -63,8 +71,10 @@ random.seed(3)
 for i in range(60 * 60 * 7):
 	if g.scene == 'levelup':
 		seen.add('levelup')
+		if i % 7 == 0: wheel(random.choice((1, -1)))
 		if i % 4 == 0:
-			press(random.choice([pygame.K_RETURN, pygame.K_r, pygame.K_x, pygame.K_TAB]))
+			press(random.choice([pygame.K_RETURN, pygame.K_r, pygame.K_x,
+			                     pygame.K_TAB, pygame.K_ESCAPE]))
 	elif g.scene == 'play':
 		if i % 900 == 0:
 			press(pygame.K_ESCAPE)          # pause

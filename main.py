@@ -284,6 +284,8 @@ class Game:
 						else: return False
 					elif ev.key == pygame.K_ESCAPE:
 						return False
+				elif ev.type == pygame.MOUSEWHEEL and ev.y:
+					self.sel = (self.sel - ev.y) % len(self.menu); self.audio.play('move', 0.7)
 
 			elif self.scene == 'select':
 				from game.weapons import BOOTS
@@ -305,6 +307,10 @@ class Game:
 						self.audio.play('pick', 1.0); self.start()
 					elif ev.key == pygame.K_ESCAPE:
 						self.scene = 'title'
+				elif ev.type == pygame.MOUSEWHEEL and ev.y:
+					n = len(BOOTS)
+					self.boot_sel = (self.boot_sel - ev.y) % n
+					self.audio.play('move', 0.7)
 				elif ev.type == pygame.MOUSEMOTION:
 					for i, r in enumerate(self.boot_rects):
 						if r.collidepoint(ev.pos): self.boot_sel = i
