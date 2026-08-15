@@ -20,6 +20,7 @@ CONTROLS = (
 	('F11 or Alt+Enter', 'fullscreen'),
 	('F5', 'mouse mode: pointer or drag'),
 	('F2 / F4', 'bloom / scanlines'),
+	('F6', 'screenshake: full / light / off'),
 	('F3', 'fps counter'),
 	('M', 'mute'),
 	('Q', 'quit to menu'),
@@ -1137,7 +1138,7 @@ def draw_title(s, t, sel, items, hiscore):
 		          CX, H - 70, 13, INK_FAINT, False, 'tc')
 	draw_text(s, 'WASD or HOLD LEFT MOUSE to move   SPACE / RIGHT CLICK dash   ESC pause',
 	          CX, H - 42, 12, INK_FAINT, False, 'tc')
-	draw_text(s, 'F11 fullscreen   F5 mouse mode   F2 bloom   F3 fps   M mute       '
+	draw_text(s, 'F11 fullscreen   F5 mouse mode   F6 screenshake   F2 bloom   F3 fps   M mute       '
 	          'runs at %dx%d  (--res 1280x720 for max framerate)' % (W, H),
 	          CX, H - 26, 12, INK_FAINT, False, 'tc')
 

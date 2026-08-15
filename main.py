@@ -159,8 +159,8 @@ class Game:
 		self.mouse_last = (CX, CY)
 		# Bloom is a full-screen additive pass: ~12 ms at 1080p, ~5 ms at 720p. We
 		# render natively for a crisp fullscreen, so on big displays it starts off.
-		self.opts = {'dmgnum': True, 'shake': 1.0, 'quality': 1.0, 'overlay': True,
-		             'bloom': W * H <= 1500000}
+		self.opts = {'dmgnum': True, 'shake': float(self.save.get('shake', 1.0)),
+		             'quality': 1.0, 'overlay': True, 'bloom': W * H <= 1500000}
 		self.slow_frames = 0
 
 	def _flags(self):
@@ -254,6 +254,21 @@ class Game:
 					continue
 				if ev.key == pygame.K_F4:
 					self.opts['overlay'] = not self.opts['overlay']
+					continue
+				if ev.key == pygame.K_F6:
+					# Late game triggers shake faster than the trauma decays, so the
+					# frame never settles. The amplitude was always a knob, it just
+					# had no key; it takes the glitch jitter down with it.
+					steps = (1.0, 0.5, 0.0)
+					cur = self.opts.get('shake', 1.0)
+					i = min(range(3), key=lambda k: abs(steps[k] - cur))
+					v = steps[(i + 1) % 3]
+					self.opts['shake'] = v
+					self.save['shake'] = v
+					save_data(self.save)
+					if self.world:
+						lbl = 'OFF' if v <= 0.0 else ('LIGHT' if v < 1.0 else 'FULL')
+						self.world.banner('SCREENSHAKE ' + lbl, 'F6 cycles full / light / off', CYAN)
 					continue
 				if ev.key == pygame.K_F11 or (ev.key == pygame.K_RETURN and (ev.mod & pygame.KMOD_ALT)):
 					self.toggle_fullscreen()

@@ -462,8 +462,8 @@ class World:
 		sk = self.opts.get('shake', 1.0) * self.pace['shake']
 		sx = self.fx.shake_x * sk
 		sy = self.fx.shake_y * sk
-		if self.glitch_t > 0.0:
-			sx += self.rng.uniform(-9, 9); sy += self.rng.uniform(-5, 5)
+		if self.glitch_t > 0.0 and sk > 0.0:
+			sx += self.rng.uniform(-9, 9) * sk; sy += self.rng.uniform(-5, 5) * sk
 		camx = self.camx + sx; camy = self.camy + sy
 
 		self.last_cam = (camx, camy)
