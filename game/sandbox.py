@@ -164,8 +164,7 @@ class Sandbox:
 			w.arsenal = Arsenal(w, w.boot['emit'] if w.boot else 'bolt')
 			w.arsenal.slots = MAX_PROCESSES
 			pl.reset_stats()
-			pl.pace_xp = w.pace['xp']
-			pl.cd_mult *= w.pace['cd']
+			pl.apply_pace(w.pace)
 			self.proc = 0
 			self.say('BUILD WIPED', 'back to one bare process', RED)
 		elif name == 'drop':

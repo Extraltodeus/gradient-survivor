@@ -51,6 +51,13 @@ class Player:
 		self.cool_mult = 1.0
 		self.passives = {}
 
+	def apply_pace(self, pace):
+		"""Run schedule multipliers. Kept multiplicative and out of xp_mult so the
+		passives that touch the same stats stay worth the same to the player."""
+		self.pace_xp = pace['xp']
+		self.cd_mult *= pace['cd']
+		self.move_mult *= pace['move']
+
 	# ------------------------------------------------------------- passives
 	def apply_passive(self, pid):
 		self.passives[pid] = self.passives.get(pid, 0) + 1

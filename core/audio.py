@@ -127,6 +127,13 @@ def _snd(mono, vol=1.0, pan=0.0):
 	return pygame.sndarray.make_sound(np.ascontiguousarray((st * 32000).astype(np.int16)))
 
 
+# Shape of the phrase. The pad inversion, the chord walk and the fills run on an
+# eight bar cycle; the arp octave and whether the lead speaks run on sixteen, so
+# the two never line up and the real loop is sixteen bars, not one.
+_ARP_OCT = (0, 0, 12, 0, -12, 0, 12, 12, 0, 12, 0, -12, 12, 0, 12, 24)
+_LEAD_BARS = (0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1)
+
+
 def _deg(scale, d):
 	"""Scale degree -> semitones, wrapping octaves in both directions."""
 	n = len(scale)
@@ -406,7 +413,12 @@ class Audio:
 		p = self.pattern
 		st = self.step
 		i16 = st % 16
-		bar = (st // 16) % 4
+		# an eight bar phrase, not a one bar loop: the same sixteen steps coming
+		# back untouched every two seconds is what makes procedural music unbearable,
+		# so each bar of the phrase re-voices the pad, moves the arp octave, decides
+		# whether the lead speaks at all, and hands the drums a different ending
+		bar = (st // 16) % 8
+		bar16 = (st // 16) % 16
 		inten = min(1.0, self.intensity + (0.35 if self.boss else 0.0))
 		scale = p['scale']
 		root = p['root']
@@ -416,12 +428,13 @@ class Audio:
 		vb = p.get('voices', ('bass', 'pluck', 'lead', 'warm'))
 		v_bass, v_arp, v_lead, v_pad = vb
 
-		# --- pad: one chord per bar, held
+		# --- pad: one chord per bar, inverted over the second half of the phrase
 		if i16 == 0:
 			oct_ = 0 if not self.boss else -12
-			self.note(v_pad, root + tones[0] + oct_, 0.42 + 0.16 * inten)
-			self.note(v_pad, root + tones[1] + oct_, 0.30 + 0.12 * inten)
-			self.note(v_pad, root + tones[2] + oct_, 0.24 + 0.10 * inten)
+			inv = 1 if bar >= 4 else 0
+			for k, vol in ((0, 0.42), (1, 0.30), (2, 0.24)):
+				semi = tones[(k + inv) % 4] + (12 if k + inv > 3 else 0)
+				self.note(v_pad, root + semi + oct_, vol + 0.14 * inten)
 			if bar == 0 and inten > 0.45:
 				self.play('crash', 0.28 + 0.3 * inten)
 
@@ -429,19 +442,21 @@ class Audio:
 		bp = p['bass']
 		v = bp[st % len(bp)]
 		if v >= 0:
-			self.note(v_bass, root + _deg(scale, deg + v) - (12 if self.boss else 0), 0.88)
+			semi = _deg(scale, deg + v)
+			if bar in (3, 7) and i16 >= 8: semi += 12       # lift into the turnaround
+			self.note(v_bass, root + semi - (12 if self.boss else 0), 0.88)
 
-		# --- arp: chord tones, comes in once things move
+		# --- arp: chord tones, wandering octave, comes in once things move
 		ap = p.get('arp')
 		if ap and inten > 0.10:
 			v = ap[st % len(ap)]
 			if v >= 0:
 				n = len(tones)
-				semi = tones[v % n] + 12 * (v // n)
+				semi = tones[v % n] + 12 * (v // n) + _ARP_OCT[bar16]
 				self.note(v_arp, root + 12 + semi, 0.22 + 0.30 * inten)
 
-		# --- lead: the melody only shows up when it is earned
-		if inten > 0.42 or p.get('always_lead') or self.boss:
+		# --- lead: only on the bars that call for it, so it stays a melody
+		if p.get('always_lead') or self.boss or (inten > 0.42 and _LEAD_BARS[bar16]) or inten > 0.85:
 			lp = p['lead']
 			v = lp[st % len(lp)]
 			if v >= 0:
@@ -449,7 +464,9 @@ class Audio:
 
 		# --- drums
 		dr = p['drums']
-		d = dr[i16 % len(dr)]
+		d = dr[st % len(dr)]
+		if bar == 4 and i16 < 8 and inten > 0.5:
+			d &= ~1                                        # one bar off the floor
 		if d & 1: self.play('kick', 0.88)
 		if d & 2 and inten > 0.06: self.play('hat', 0.22 + 0.32 * inten)
 		if d & 4 and inten > 0.22: self.play('snare', 0.42 + 0.2 * inten)
@@ -457,12 +474,16 @@ class Audio:
 		if d & 16 and inten > 0.50: self.play('clap', 0.38)
 		if d & 32 and inten > 0.55: self.play('tom', 0.40)
 		if d & 64 and inten > 0.70: self.play('ride', 0.30)
+		if bar in (2, 6) and i16 in (7, 15) and inten > 0.35: self.play('ohat', 0.26)
 		if self.boss and i16 in (6, 14): self.play('tom', 0.34)
 
-		# --- fill: last beat of the 4-bar loop, once the fight is hot
-		if bar == 3 and i16 >= 12 and inten > 0.35:
-			if i16 % 2 == 0: self.play('tom', 0.30 + 0.1 * (i16 - 12))
-			else: self.play('snare', 0.26)
+		# --- fills: a small one mid phrase, the real one at the end of it
+		if i16 >= 12 and inten > 0.35 and bar in (3, 7):
+			if bar == 7:
+				if i16 % 2 == 0: self.play('tom', 0.30 + 0.1 * (i16 - 12))
+				else: self.play('snare', 0.28)
+			elif i16 >= 14:
+				self.play('snare', 0.24)
 
 	def toggle_mute(self):
 		self.muted = not self.muted

@@ -749,6 +749,12 @@ class LevelUp:
 			draw_text(s, line, rr.x + 16, y, 13, INK_DIM)
 			y += 17
 
+		# the note banner is laid out first: it owns the bottom of the card, and
+		# everything above has to know where it stops
+		note_lines = wrap(o.note, 12, rr.w - 34)[:2] if o.note else []
+		note_h = 18 + 15 * len(note_lines)
+		note_top = rr.y + rr.h - (note_h + 10 if note_lines else 12)
+
 		# process preview
 		if o.proc is not None and o.kind in ('op', 'rank', 'fuse'):
 			y = max(y + 10, rr.y + 244)
@@ -770,19 +776,18 @@ class LevelUp:
 				draw_text(s, '* ' + sid, rr.x + 16, y, 11, VIOLET, True)
 				y += 14
 			p = o.proc.evo_progress()
-			if p and not o.proc.evo and y + 28 < rr.y + rr.h - 46:
+			if p and not o.proc.evo and y + 26 < note_top:
 				ev, missing, frac = p
 				draw_text(s, trim(ev['name'], 24), rr.x + 16, y + 4, 11, shade(GOLD, 0.8), True)
 				bar(s, rr.x + 16, y + 20, rr.w - 32, 3, frac, GOLD, (30, 28, 20), 2)
-			elif o.proc.evo:
+			elif o.proc.evo and y + 16 < note_top:
 				draw_text(s, 'EVOLVED', rr.x + 16, y + 4, 11, GOLD, True)
 
-		if o.note:
-			ny = rr.y + rr.h - 40
+		if note_lines:
 			pygame.draw.rect(s, (o.note_col[0] // 6, o.note_col[1] // 6, o.note_col[2] // 6),
-			                 (rr.x + 10, ny, rr.w - 20, 30), 0, 6)
-			for line in wrap(o.note, 12, rr.w - 32)[:2]:
-				draw_text(s, line, rr.x + rr.w * 0.5, ny + 9, 12, o.note_col, True, 'tc')
+			                 (rr.x + 10, note_top, rr.w - 20, note_h), 0, 6)
+			for j, line in enumerate(note_lines):
+				draw_text(s, line, rr.x + rr.w * 0.5, note_top + 6 + j * 15, 12, o.note_col, True, 'tc')
 
 		draw_text(s, str(i + 1), rr.x + rr.w - 16, rr.y + 16, 14, INK_FAINT, True, 'tr')
 
@@ -1037,7 +1042,13 @@ def draw_select(s, t, sel, boots, pace_sel=0):
 	draw_text(s, 'BOOT CONFIGURATION', CX, 26, 28, INK, True, 'tc')
 	draw_text(s, 'TRAINING SCHEDULE   -   1-4 or click', CX, 62, 12, INK_FAINT, False, 'tc')
 	pace_rects = draw_pace_strip(s, 80, pace_sel, t)
-	draw_text(s, PACES[pace_sel]['desc'], CX, 160, 12, INK_DIM, False, 'tc')
+	p = PACES[pace_sel]
+	draw_text(s, p['desc'], CX, 158, 12, INK_DIM, False, 'tc')
+	from game.director import BIOME_TIME
+	draw_text(s, 'xp x%.1f    caches x%.1f    biome %ds    pressure x%.1f    move +%d%%    cooldown %d%%'
+	          % (p['xp'], p['chest'], int(BIOME_TIME / p['biome']), p['rate'],
+	             round((p['move'] - 1.0) * 100), round(p['cd'] * 100)),
+	          CX, 174, 11, shade(p['col'], 0.85), False, 'tc')
 
 	n = len(boots)
 	cols = 3
@@ -1045,7 +1056,7 @@ def draw_select(s, t, sel, boots, pace_sel=0):
 	gapx, gapy = 26, 22
 	rows = (n + cols - 1) // cols
 	x0 = CX - (cols * cw + (cols - 1) * gapx) * 0.5
-	y0 = 188
+	y0 = 194
 	rects = []
 	for i, b in enumerate(boots):
 		cx_ = x0 + (i % cols) * (cw + gapx)

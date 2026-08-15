@@ -62,8 +62,7 @@ class World:
 			self.arsenal.procs[0].add_op(boot['op'])
 			self.player.apply_passive(boot['passive'])
 			self.player.hp = self.player.maxhp
-		self.player.pace_xp = self.pace['xp']
-		self.player.cd_mult *= self.pace['cd']
+		self.player.apply_pace(self.pace)
 		self.director = Director(self, seed, self.pace)
 		self.backdrop = Backdrop()
 		self.level = BIOMES[0]
