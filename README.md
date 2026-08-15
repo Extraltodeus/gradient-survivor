@@ -36,16 +36,36 @@ python main.py
 default the game renders natively at your display size, because it is all
 vectors and there is nothing to upscale.
 
-| | |
+### Controls
+
+| moving | |
 |---|---|
-| `WASD` / arrows | move |
-| hold **LMB** | move toward the cursor (`F5` switches to virtual-joystick drag) |
-| `SPACE` / **RMB** | dash, with a few i-frames |
-| `1`–`4` / click | take an upgrade |
-| `R` / `X` / `TAB` | reroll / banish / skip an upgrade |
-| `ESC` or `P` | pause |
-| `TAB` | open the bench (sandbox runs only) |
-| `F11` / `F2` / `F3` / `F4` / `M` | fullscreen / bloom / fps / scanlines / mute |
+| `WASD` or arrows | move |
+| hold **LMB** | move toward the cursor |
+| `F5` | mouse mode: pointer or virtual joystick |
+| `SPACE` or **RMB** | dash, with a few i-frames |
+
+| in a run | |
+|---|---|
+| `ESC` or `P` | pause and inspect the build |
+| `TAB` | open the bench — sandbox runs only |
+| `Q` | quit to the menu, from the pause screen |
+
+| choosing an upgrade | |
+|---|---|
+| `1`–`4` or click | take it |
+| `R` | reroll the offers |
+| `X` | banish one — it will not be offered again this run |
+| `TAB` or `ESC` | skip, and take +12 integrity instead |
+
+| display | |
+|---|---|
+| `F6` | **screenshake: full / light / off** — late game shakes constantly, this stops it |
+| `F11` or `Alt`+`Enter` | fullscreen |
+| `F2` | bloom (the first thing dropped if the framerate slips) |
+| `F4` | scanlines and vignette |
+| `F3` | fps counter |
+| `M` | mute |
 
 ---
 
