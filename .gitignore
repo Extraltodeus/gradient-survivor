@@ -3,6 +3,9 @@ __pycache__/
 save.json
 shots/
 build/
-misc/
+# keep the two build assets, ignore anything else dropped in there
+misc/*
+!misc/gradient.png
+!misc/gradient.ico
 dist/
 GradientDescent.spec
