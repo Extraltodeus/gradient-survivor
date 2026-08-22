@@ -271,8 +271,7 @@ def build_offers(w, n=None, avoid=None):
 		a, b = cands[0], cands[1]
 		key = 'fuse:%d:%d' % (a.uid, b.uid)
 		fo = _mk('fuse', key, 'MERGE', a.name + '  <-  ' + b.name,
-		         'Two processes become one. No op is lost, shared ops gain a rank, '
-		         'the ranks add, and a process slot is freed.',
+		         'Two processes become one. No op is lost and a slot is freed.',
 		         MAGENTA, 3, '&', _apply_fuse(w, a, b), a,
 		         b.name + ' stops existing', RED, 11.0)
 		fo.ops_preview = (a.emit, b.emit)
