@@ -61,6 +61,7 @@ class World:
 		if boot:
 			self.arsenal.procs[0].add_op(boot['op'])
 			self.player.apply_passive(boot['passive'])
+			self.player.set_unit(boot)
 			self.player.hp = self.player.maxhp
 		self.player.apply_pace(self.pace)
 		self.director = Director(self, seed, self.pace)
@@ -355,14 +356,15 @@ class World:
 			for i in range(26):
 				drop(self, 'xp', e.x + rng.uniform(-70, 70), e.y + rng.uniform(-70, 70), 12)
 			self.stats['kills'] += 1
-			bi = self.director.biome_index()
-			if self.sandbox:
-				self.director.advance_biome(self)
-			elif self.director.biome['id'] == 'collapse' and self.director.endless == 0:
+			# Beating the last boss is a milestone, not an ending: the run keeps
+			# going and the director's endless counter takes the difficulty up a
+			# notch per lap. Only dying stops a run.
+			if not self.sandbox and self.director.biome['id'] == 'collapse' and not self.win:
 				self.win = True
-				self.director.next_biome_t = self.director.t + 999.0
-			else:
-				self.director.advance_biome(self)
+				self.banner('CONVERGED', 'the training run does not stop here', GOLD)
+				self.fx.screen_flash(GOLD, 0.8)
+				self.audio.play('evolve', 1.0)
+			self.director.advance_biome(self)
 			return
 		if e.xp > 0:
 			drop(self, 'xp', e.x, e.y, e.xp)

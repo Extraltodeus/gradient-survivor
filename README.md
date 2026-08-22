@@ -43,20 +43,22 @@ vectors and there is nothing to upscale.
 | `WASD` or arrows | move |
 | hold **LMB** | move toward the cursor |
 | `F5` | mouse mode: pointer or virtual joystick |
-| `SPACE` or **RMB** | dash, with a few i-frames |
+| `SPACE` or **RMB** | dash, or blink if your unit blinks |
 
 | in a run | |
 |---|---|
 | `ESC` or `P` | pause and inspect the build |
+| `T` | the evolution tree, from the pause screen |
 | `TAB` | open the bench — sandbox runs only |
 | `Q` | quit to the menu, from the pause screen |
 
 | choosing an upgrade | |
 |---|---|
 | `1`–`5` or click | take it |
-| `R` | reroll the offers |
-| `X` | banish one — it will not be offered again this run |
-| `TAB` or `ESC` | skip, and take +12 integrity instead |
+| `R` or the button | reroll the offers |
+| `X` or the button | banish one — it will not be offered again this run |
+| `T` or the button | open the full evolution tree |
+| `ESC` or the button | skip, and repair to full integrity instead |
 
 | display | |
 |---|---|
@@ -75,8 +77,9 @@ You never pick up a gun. You run **processes**, and a process is one *emitter*
 (how matter leaves the agent) plus a bag of ranked *ops* (what that matter then
 does). Ops stack, interact, and rename the thing they are attached to.
 
-- **12 emitters** — bolts, orbiting weights, a loss field, novas, sweeping
-  beams, mines, chain lightning, turrets, returning blades, spirals, rain.
+- **13 emitters** — bolts, orbiting weights, a loss field, novas, sweeping
+  beams, mines, stuttering chain lightning, a flamethrower, turrets, returning
+  blades, spirals, rain.
 - **22 ops** — pierce, blast, split, chain, homing, bounce, spin, multishot,
   recursion, echo, giant, swift, crit, momentum, overclock, feedback, ignite,
   quantize, shock, corrupt, void, drain.
@@ -84,19 +87,43 @@ does). Ops stack, interact, and rename the thing they are attached to.
   reads. `pierce 2 + blast 2` detonates on *every* perforation; `frost 2 +
   blast 2` shatters chilled targets; `split 2 + recursion 2` makes shards that
   split again.
-- **17 evolutions** — accumulate the right shape and the process crystallises.
+- **19 evolutions** — accumulate the right shape and the process crystallises.
   `pierce 3 + blast 3` on a bolt becomes the RAILGUN OF TRUTH.
-- **Fusion** — merge two processes into one, union of every op, one slot freed.
+- **Fusion** — merge two processes into one. Every op survives at the better of
+  the two ranks, shared ops gain a rank, the ranks add, and a slot is freed. A
+  merge is never a downgrade: the op cap rises with the merge itself.
 
 Offers are not random noise: they are weighted toward whatever would make your
 current build *cohere* — ops that finish an evolution, ops that light up a
 synergy, fusions that free a slot — and pushed apart, so five cards are never
-five variations of the same idea. Every card runs the weapon it is offering, at
-its real cadence and projectile count, and the panel underneath shows where that
-process can still go: each evolution, its recipe, how far along you are, and what
-it looks like when it lands.
+five variations of the same idea. A free process slot always gets a weapon
+offered for it.
+
+Every card runs the weapon it is offering at its real cadence, projectile count
+and op set — homing curves, bounce zigzags, split shatters, recursion relaunches
+— and the panel underneath is a **before / after**: the weapon as it runs now,
+the same weapon with this card taken, and every number that moves between them.
+A global upgrade is shown landing on the weapon you actually have; a radius
+upgrade is drawn to scale against the radius you actually have. Nothing is
+truncated — titles wrap, and text shrinks to fit rather than being cut.
+
+`T` opens the whole system as a tree: every emitter on the left, everything it
+can become on the right, with the recipe, how far along you are, and the effect
+running live.
 
 ![The level-up screen](docs/levelup.png)
+
+---
+
+## Seven units
+
+A boot profile is a body, not a recolour: a dart, three lobes in orbit, a slotted
+ring, a hex, a cross, a blade, a prism. Each starts on a different emitter with
+one op already attached and one system upgrade banked. **QUANTUM** does not dash
+at all — it blinks 210 px on a 1.15 s cooldown, and it carries the flamethrower,
+because it will be standing in the middle of them.
+
+![The boot screen](docs/units.png)
 
 ---
 
@@ -132,7 +159,7 @@ curve, coolant mains, packet lanes, a frame that tears.
 <tr>
 <td><img src="docs/biome_firewall.jpg" alt="The Firewall"><br><b>THE FIREWALL</b><br><i>you are not supposed to be here</i></td>
 <td><img src="docs/biome_collapse.jpg" alt="Model Collapse"><br><b>MODEL COLLAPSE</b><br><i>it is only reading itself now</i></td>
-<td>Each biome ends on a telegraphed multi-phase boss, then folds into the next one.</td>
+<td>Each biome ends on a telegraphed multi-phase boss, then folds into the next one. Beating the last one is a milestone, not an ending: the run keeps going, the endless counter takes the ramp up a notch per lap, and only dying stops it. The end screen keeps a board per schedule.</td>
 </tr>
 </table>
 
@@ -188,11 +215,25 @@ python tools/audition.py
 
 Start a **SANDBOX** run from the title menu and `TAB` opens a live workshop:
 install any emitter, op, passive or whole evolution recipe, spawn any archetype
-or boss, freeze the spawns, jump biomes, and watch a live dps meter. The world is
-paused while it is open; close it and whatever you just installed is immediately
-firing at real enemies.
+or boss, freeze the spawns, jump biomes, and watch a live dps meter. Left click
+adds a rank, right click takes one back, and every process has a delete button,
+so a wrong turn costs nothing. The schedule and the unit can be swapped from the
+top strip without restarting, the process slot count is a dial, and every button
+carries its own description. **START RUN** drops you back into the fight with
+whatever you just built.
 
 ![The bench](docs/bench.png)
+
+---
+
+## The tree
+
+`T` from the pause screen, `T` on the level-up screen, or the last page of the
+codex. Every emitter on the left, everything it can crystallise into on the
+right, the recipe for each, how far the process you are running has got along it,
+and the evolution playing live in the panel beside it.
+
+![The evolution tree](docs/tree.png)
 
 ---
 

@@ -266,6 +266,95 @@ def wrap(s, size, width, bold=False):
 def rrect(dst, rect, color, radius=6, width=0):
 	pygame.draw.rect(dst, color, rect, width, border_radius=radius)
 
+# ============================================================ AGENT SHAPES
+# Each boot profile is a different unit, and a unit you cannot tell apart from
+# the next one is not a choice. These are drawn from vectors at any radius so the
+# same routine serves the player, the boot cards and the end screen.
+AGENT_SHAPES = ('dart', 'hex', 'trilobe', 'annulus', 'cross', 'blade', 'prism')
+
+
+def agent_shape(s, x, y, a, shape, col, r=11.0, t=0.0, filled=True, wire=None):
+	"""Draw one unit facing `a`. `filled` off = the invulnerability blink."""
+	wire = wire if wire is not None else (255, 255, 255)
+	cs = math.cos(a); sn = math.sin(a)
+	def P(fwd, side):
+		return (x + cs * fwd - sn * side, y + sn * fwd + cs * side)
+
+	if shape == 'hex':
+		pts = [P(math.cos(i * TAU / 6 + 0.5) * r * 1.25, math.sin(i * TAU / 6 + 0.5) * r * 1.25)
+		       for i in range(6)]
+		inner = [P(math.cos(i * TAU / 6 + 0.5) * r * 0.6, math.sin(i * TAU / 6 + 0.5) * r * 0.6)
+		         for i in range(6)]
+		if filled:
+			pygame.draw.polygon(s, col, pts)
+			pygame.draw.polygon(s, wire, pts, 1)
+			pygame.draw.polygon(s, shade(col, 0.35), inner)
+		else:
+			pygame.draw.polygon(s, shade(col, 0.5), pts, 1)
+		pygame.draw.line(s, wire if filled else shade(col, 0.5), P(r * 0.6, 0), P(r * 1.7, 0), 2)
+	elif shape == 'trilobe':
+		for i in range(3):
+			aa = a + t * 1.9 + i * TAU / 3
+			px = x + math.cos(aa) * r * 0.72; py = y + math.sin(aa) * r * 0.72
+			if filled:
+				pygame.draw.circle(s, col, (int(px), int(py)), max(2, int(r * 0.52)))
+				pygame.draw.circle(s, wire, (int(px), int(py)), max(2, int(r * 0.52)), 1)
+			else:
+				pygame.draw.circle(s, shade(col, 0.5), (int(px), int(py)), max(2, int(r * 0.52)), 1)
+		pygame.draw.polygon(s, wire if filled else shade(col, 0.4),
+		                    [P(r * 1.6, 0), P(r * 0.2, r * 0.4), P(r * 0.2, -r * 0.4)],
+		                    0 if filled else 1)
+	elif shape == 'annulus':
+		g = ring(int(r * 1.5), col, max(2, int(r * 0.34)), 255 if filled else 110)
+		s.blit(g, (x - g.get_width() * 0.5, y - g.get_height() * 0.5))
+		for i in range(4):
+			aa = a - t * 1.3 + i * TAU / 4
+			pygame.draw.line(s, wire if filled else shade(col, 0.4),
+			                 (x + math.cos(aa) * r * 0.35, y + math.sin(aa) * r * 0.35),
+			                 (x + math.cos(aa) * r * 1.05, y + math.sin(aa) * r * 1.05), 2)
+		pygame.draw.circle(s, col if filled else shade(col, 0.4), (int(x), int(y)), max(2, int(r * 0.3)))
+	elif shape == 'cross':
+		w_ = r * 0.42
+		for k in (0, 1):
+			b = a + k * math.pi * 0.5
+			c2 = math.cos(b); s2 = math.sin(b)
+			L = r * (1.55 if k == 0 else 1.05)
+			pts = [(x + c2 * L - s2 * w_, y + s2 * L + c2 * w_),
+			       (x + c2 * L + s2 * w_, y + s2 * L - c2 * w_),
+			       (x - c2 * L + s2 * w_, y - s2 * L - c2 * w_),
+			       (x - c2 * L - s2 * w_, y - s2 * L + c2 * w_)]
+			if filled:
+				pygame.draw.polygon(s, col, pts)
+				pygame.draw.polygon(s, wire, pts, 1)
+			else:
+				pygame.draw.polygon(s, shade(col, 0.5), pts, 1)
+	elif shape == 'blade':
+		pts = [P(r * 1.9, 0), P(r * 0.1, r * 0.85), P(-r * 0.9, 0), P(r * 0.1, -r * 0.85)]
+		if filled:
+			pygame.draw.polygon(s, col, pts)
+			pygame.draw.polygon(s, wire, pts, 1)
+			pygame.draw.line(s, wire, P(r * 1.9, 0), P(-r * 0.9, 0), 1)
+		else:
+			pygame.draw.polygon(s, shade(col, 0.5), pts, 1)
+	elif shape == 'prism':
+		k = 0.55 + 0.45 * abs(math.sin(t * 2.2))
+		pts = [P(r * 1.5, 0), P(0, r * 1.0), P(-r * 1.1, 0), P(0, -r * 1.0)]
+		inner = [P(r * 1.5 * k, 0), P(0, r * 1.0 * k), P(-r * 1.1 * k, 0), P(0, -r * 1.0 * k)]
+		if filled:
+			pygame.draw.polygon(s, shade(col, 0.55), pts)
+			pygame.draw.polygon(s, wire, pts, 1)
+			pygame.draw.polygon(s, col, inner)
+		else:
+			pygame.draw.polygon(s, shade(col, 0.5), pts, 1)
+	else:                                   # dart, the original
+		pts = [P(r * 1.7, 0), P(-r * 0.737, r * 0.675), P(-r * 0.5, 0), P(-r * 0.737, -r * 0.675)]
+		if filled:
+			pygame.draw.polygon(s, col, pts)
+			pygame.draw.polygon(s, wire, pts, 1)
+		else:
+			pygame.draw.polygon(s, shade(col, 0.5), pts, 1)
+
+
 def weighted(rng, pairs):
 	"""pairs: [(item, weight), ...]"""
 	tot = 0.0

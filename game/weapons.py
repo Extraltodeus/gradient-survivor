@@ -58,9 +58,14 @@ _em('mine', name='DROPOUT MINE', glyph='x', col=(255, 150, 60), tier=1,
     affinity=('blast', 'split', 'void', 'burn'))
 
 _em('arc', name='CHAIN LOGIT', glyph='z', col=(190, 220, 255), tier=1,
-    desc='Instant lightning that hops between activations.',
-    dmg=13.0, cd=1.45, count=1, speed=0.0, size=0.0, ttl=0.1, jumps=2,
+    desc='A near-continuous stutter of lightning that hops between activations.',
+    dmg=4.4, cd=0.40, count=1, speed=0.0, size=0.0, ttl=0.1, jumps=2,
     affinity=('chain', 'shock', 'frost', 'crit'))
+
+_em('flame', name='FLASH ATTENTION', glyph='f', col=(255, 118, 38), tier=1,
+    desc='A sustained cone of fire poured out in front of you. Short range, no gaps.',
+    dmg=3.6, cd=0.13, count=4, speed=440.0, size=7.0, ttl=0.40, pierce=3, cone=0.52,
+    affinity=('burn', 'giant', 'multishot', 'void'))
 
 _em('turret', name='SENTINEL NODE', glyph='T', col=(140, 255, 140), tier=2,
     desc='Deploys an autonomous node that fires on its own.',
@@ -86,21 +91,33 @@ EMIT_ORDER = list(E.keys())
 STARTERS = ('bolt', 'swarm', 'orbit', 'aura')
 
 # Boot profiles: each seeds one process with one op already attached, so the
-# combinatorial system is visible from the first second of the run.
+# combinatorial system is visible from the first second of the run. `shape`,
+# `col` and `mobility` are the unit itself -- two boots must never be the same
+# triangle in a different tint.
 BOOTS = [
 	dict(id='vector',  name='VECTOR',   emit='bolt',  op='pierce', passive='power',
+	     shape='dart', col=CYAN, mobility='dash',
 	     desc='One clean line of inference. Starts already able to punch through.'),
 	dict(id='census',  name='CENSUS',   emit='swarm', op='homing', passive='amount',
+	     shape='trilobe', col=(120, 255, 210), mobility='dash',
 	     desc='A cloud of small opinions that all agree to find you a target.'),
 	dict(id='halo',    name='HALO',     emit='orbit', op='frost',  passive='area',
+	     shape='annulus', col=(150, 190, 255), mobility='dash',
 	     desc='Cold weights in orbit. Anything that touches you slows down.'),
 	dict(id='descent', name='DESCENT',  emit='aura',  op='burn',   passive='hp',
+	     shape='hex', col=(255, 120, 190), mobility='dash',
 	     desc='A burning loss field. You are the hazard now.'),
 	dict(id='dropout', name='DROPOUT',  emit='mine',  op='blast',  passive='area',
+	     shape='cross', col=(255, 150, 60), mobility='dash',
 	     desc='Leave unstable nodes behind you and never look back.'),
 	dict(id='recurse', name='RECURSE',  emit='blade', op='bounce', passive='speed',
+	     shape='blade', col=(255, 240, 120), mobility='dash',
 	     desc='A blade with a bad exit condition. It comes back. Repeatedly.'),
+	dict(id='quantum', name='QUANTUM',  emit='flame', op='burn',   passive='haste',
+	     shape='prism', col=VIOLET, mobility='blink',
+	     desc='Blinks instead of dashing. Carries a flamethrower for where it lands.'),
 ]
+BOOT_BY_ID = {b['id']: b for b in BOOTS}
 
 
 # ================================================================== OPS
@@ -130,8 +147,8 @@ _op('echo', 'ECHO', 'e', 'Every volley repeats at 55% power.', rare=2,
     mods={'dmg': -0.03})
 
 # -- quality -----------------------------------------------------------
-_op('giant', 'GIANT', 'G', 'Bigger, heavier, harder hitting shots.', col=(255, 220, 160),
-    mods={'size': 0.30, 'dmg': 0.16, 'speed': -0.05}, tag='stat')
+_op('giant', 'GIANT', 'G', 'Much bigger shots: they cover ground the small ones miss.',
+    col=(255, 220, 160), mods={'size': 0.36, 'dmg': 0.10, 'speed': -0.05}, tag='stat')
 _op('swift', 'SWIFT', 's', 'Faster shots, faster cycling.', col=(180, 255, 255),
     mods={'speed': 0.16, 'cd': -0.075}, tag='stat')
 _op('crit', 'CRIT', '!', '+8% critical chance, +25% critical damage.', col=GOLD,
@@ -242,6 +259,12 @@ EVOS = [
 	_ev('carpet', 'rain', {'blast': 3, 'burn': 3}, 'SATURATION BOMBING',
 	    'The sampler stops being random and simply covers everything.',
 	    {'dmg': 0.6, 'count': 3, 'cd': 0.25}),
+	_ev('runaway', 'flame', {'burn': 3, 'giant': 3}, 'THERMAL RUNAWAY',
+	    'The cone stops being a cone. Everything in front of you is already ash.',
+	    {'dmg': 0.55, 'size': 0.55, 'count': 4}, {'burn': 1}),
+	_ev('sink', 'flame', {'void': 3, 'pierce': 3}, 'ATTENTION SINK',
+	    'The jet inhales the field into itself, then burns what it swallowed.',
+	    {'dmg': 0.75, 'count': 2, 'speed': 0.3}, {'void': 1}),
 ]
 EVO_BY_EMIT = {}
 for _e in EVOS: EVO_BY_EMIT.setdefault(_e['emit'], []).append(_e)
@@ -335,6 +358,10 @@ class Process:
 			self.heat_dmg = 0.055 + 0.012 * oc
 			self.heat_decay = 1.5 if 'RUNAWAY' not in self.syn else 0.85
 
+	def op_cap(self):
+		"""A fused process carries more ops than a plain one -- see fuse_plan."""
+		return MAX_OPS_PER_PROC + self.fused
+
 	def add_op(self, op, n=1):
 		self.ops[op] = min(MAX_TRAIT_RK, self.ops.get(op, 0) + n)
 		self.refresh()
@@ -418,6 +445,31 @@ class Process:
 		c = self.stats(pl)
 		mult = 1.0 + 0.5 * len(self.ops) + 0.9 * len(self.syn) + (2.0 if self.evo else 0.0)
 		return c['dmg'] * c['count'] / max(0.08, c['cd']) * mult
+
+
+def fuse_plan(a, b):
+	"""What merging b into a produces: (ops, rank, dropped).
+
+	A merge must never be a downgrade. Every op survives at least at the higher of
+	the two ranks, shared ops gain one, and the op cap is *raised* by the merge
+	itself, so the ops that would have fallen off the end simply do not.
+	"""
+	ops = dict(a.ops)
+	for k, v in b.ops.items():
+		ops[k] = min(MAX_TRAIT_RK, max(ops.get(k, 0), v) + (1 if k in a.ops else 0))
+	cap = MAX_OPS_PER_PROC + 1 + a.fused + b.fused
+	dropped = []
+	if len(ops) > cap:
+		for k, _v in sorted(ops.items(), key=lambda kv: (kv[1], kv[0]))[:len(ops) - cap]:
+			dropped.append(k); del ops[k]
+	return ops, a.rank + max(1, min(6, b.rank)), dropped
+
+
+def ghost_process(emit, ops, rank):
+	"""A throwaway Process used only to price a hypothetical build for the UI."""
+	g = Process(emit, rank, ops)
+	g.check_evo()
+	return g
 
 
 def tint(ops, base):
@@ -605,6 +657,25 @@ def _fire_blade(w, pr, c, mult):
 	w.audio.play('fire_boom', 0.45, 0.07)
 
 
+def _fire_flame(w, pr, c, mult):
+	"""A cone of short-lived piercing embers. Fires constantly, so each tongue is
+	cheap: the damage lives in the overlap, not in any one particle."""
+	em = E['flame']
+	pl = w.player
+	a, _t = aim(w, pr)
+	n = c['count']
+	cone = em['cone'] * (1.0 + 0.16 * pr.ops.get('multishot', 0))
+	reach = c['ttl'] * (1.0 + 0.12 * pr.ops.get('giant', 0))
+	for i in range(n):
+		aa = a + w.rng.uniform(-cone, cone) * 0.5
+		sp = c['speed'] * w.rng.uniform(0.72, 1.15)
+		_shoot(w, pr, c, pl.x + math.cos(a) * 12, pl.y + math.sin(a) * 12, aa, sp,
+		       c['dmg'] * mult, c['size'] * w.rng.uniform(0.75, 1.25), reach,
+		       pierce=em['pierce'] + pr.ops.get('pierce', 0))
+	if w.rng.random() < 0.22:
+		w.audio.play('fire_swarm', 0.28, 0.2)
+
+
 def _fire_spiral(w, pr, c, mult):
 	pl = w.player
 	n = c['count']
@@ -687,13 +758,11 @@ class Arsenal:
 				fire(w, pr)
 
 	def fuse(self, a, b):
-		"""Merge b into a: union of ops at max rank +1, ranks add. Frees a slot."""
-		for k, v in b.ops.items():
-			a.ops[k] = min(MAX_TRAIT_RK, max(a.ops.get(k, 0), v) + (1 if k in a.ops else 0))
-		if len(a.ops) > MAX_OPS_PER_PROC:
-			drop = sorted(a.ops.items(), key=lambda kv: kv[1])[:len(a.ops) - MAX_OPS_PER_PROC]
-			for k, _ in drop: del a.ops[k]
-		a.rank += max(1, min(6, b.rank))
+		"""Merge b into a. The plan is computed by fuse_plan so the card can show
+		exactly this before you commit to it."""
+		ops, rank, dropped = fuse_plan(a, b)
+		a.ops = ops
+		a.rank = rank
 		a.fused += 1 + b.fused
 		if b in self.procs: self.procs.remove(b)
 		a.refresh()

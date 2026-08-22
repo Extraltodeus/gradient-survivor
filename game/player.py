@@ -17,6 +17,11 @@ class Player:
 		self.dash_cd = 0.0
 		self.dash_t = 0.0
 		self.dash_max = 3.2
+		# the unit itself: set from the boot profile by World, defaults to VECTOR
+		self.shape = 'dart'
+		self.col = CYAN
+		self.mobility = 'dash'
+		self.blink_d = 210.0
 		self.level = 1
 		self.xp = 0.0
 		self.xp_next = xp_for_level(1)
@@ -27,8 +32,8 @@ class Player:
 		self.banked = 0          # pending level-ups
 		self.pace_xp = 1.0       # run pacing: kept out of xp_mult so passives stay meaningful
 		self.god = False
-		self.rerolls = 2
-		self.banishes = 1
+		self.rerolls = 5
+		self.banishes = 2
 		self.revives = 0
 		self.reset_stats()
 
@@ -124,12 +129,35 @@ class Player:
 		if self.regen > 0.0 and self.hp < self.maxhp:
 			self.heal(self.regen * dt, False)
 
+	def set_unit(self, boot):
+		"""Adopt a boot profile's body and mobility."""
+		self.shape = boot.get('shape', 'dart')
+		self.col = boot.get('col', CYAN)
+		self.mobility = boot.get('mobility', 'dash')
+		if self.mobility == 'blink':
+			self.dash_max = 1.15      # a jump, not a commitment: it comes back fast
+
 	def try_dash(self, w):
 		if self.dash_cd > 0.0 or self.dash_t > 0.0: return False
+		if self.mobility == 'blink':
+			ox, oy = self.x, self.y
+			self.x += self.fx_ * self.blink_d
+			self.y += self.fy_ * self.blink_d
+			self.dash_cd = self.dash_max
+			self.iframe = max(self.iframe, 0.34)
+			for px, py in ((ox, oy), (self.x, self.y)):
+				w.fx.wave(px, py, 6, 62, 0.35, self.col, 3)
+				w.fx.burst(px, py, 12, self.col, 240, 0.4, 3.0)
+			for i in range(7):
+				f = (i + 1) / 8.0
+				w.fx.part('dot', ox + (self.x - ox) * f, oy + (self.y - oy) * f,
+				          0, 0, 0.3, 7.0, self.col, 0.0, glowp=0.8)
+			w.audio.play('gem', 0.7)
+			return True
 		self.dash_t = 0.16
 		self.dash_cd = self.dash_max
-		w.fx.wave(self.x, self.y, 6, 46, 0.3, CYAN, 3)
-		w.fx.burst(self.x, self.y, 10, CYAN, 220, 0.35, 3.0, adir=math.atan2(-self.fy_, -self.fx_), spread=1.6)
+		w.fx.wave(self.x, self.y, 6, 46, 0.3, self.col, 3)
+		w.fx.burst(self.x, self.y, 10, self.col, 220, 0.35, 3.0, adir=math.atan2(-self.fy_, -self.fx_), spread=1.6)
 		w.audio.play('fire_swarm', 0.5)
 		return True
 
@@ -183,22 +211,13 @@ class Player:
 	def draw(self, s, camx, camy, w):
 		x = self.x - camx; y = self.y - camy
 		t = self.t
-		col = CYAN
-		if self.hurt_flash > 0.0: col = mix(CYAN, RED, self.hurt_flash)
+		col = self.col
+		if self.hurt_flash > 0.0: col = mix(col, RED, self.hurt_flash)
 		inv = self.iframe > 0.0 and int(t * 22) % 2 == 0
 
 		blit_glow(s, x, y, 34, col, 0.85 if not inv else 0.4)
 		a = math.atan2(self.fy_, self.fx_)
-		r = P_RADIUS
-		pts = [(x + math.cos(a) * r * 1.7, y + math.sin(a) * r * 1.7),
-		       (x + math.cos(a + 2.4) * r, y + math.sin(a + 2.4) * r),
-		       (x + math.cos(a + math.pi) * r * 0.5, y + math.sin(a + math.pi) * r * 0.5),
-		       (x + math.cos(a - 2.4) * r, y + math.sin(a - 2.4) * r)]
-		if not inv:
-			pygame.draw.polygon(s, col, pts)
-			pygame.draw.polygon(s, WHITE, pts, 1)
-		else:
-			pygame.draw.polygon(s, shade(col, 0.5), pts, 1)
+		agent_shape(s, x, y, a, self.shape, col, P_RADIUS, t, not inv)
 
 		# orbiting integrity nodes
 		n = 3
@@ -209,8 +228,35 @@ class Player:
 
 		if self.dash_cd > 0.0:
 			f = 1.0 - self.dash_cd / self.dash_max
-			pygame.draw.arc(s, shade(CYAN, 0.55), pygame.Rect(int(x - 26), int(y - 26), 52, 52),
+			pygame.draw.arc(s, shade(col, 0.55), pygame.Rect(int(x - 26), int(y - 26), 52, 52),
 			                -math.pi * 0.5, -math.pi * 0.5 + TAU * f, 2)
 		else:
-			g = ring(25, CYAN, 1, 60 + int(40 * math.sin(t * 4)))
+			g = ring(25, col, 1, 60 + int(40 * math.sin(t * 4)))
 			s.blit(g, (x - g.get_width() * 0.5, y - g.get_height() * 0.5), None, pygame.BLEND_ADD)
+
+
+# ------------------------------------------------------- passive previewing
+class _StubArsenal:
+	def __init__(self, slots): self.slots = slots
+	def mark_dirty(self): pass
+
+
+class _StubWorld:
+	def __init__(self, slots): self.arsenal = _StubArsenal(slots)
+
+
+_PV_KEYS = ('dmg_mult', 'cd_mult', 'area_mult', 'pspeed_mult', 'dur_mult', 'amount',
+            'crit_c', 'crit_m', 'move_mult', 'magnet', 'xp_mult', 'luck', 'armor',
+            'dodge', 'regen', 'cool_mult', 'maxhp', 'hp', 'rerolls', 'banishes')
+
+
+def passive_preview(pl, pid, slots=0):
+	"""A copy of the player with one more rank of `pid`, for before/after cards.
+
+	Runs the real apply_passive so the card can never drift from the effect."""
+	g = Player.__new__(Player)
+	for k in _PV_KEYS: setattr(g, k, getattr(pl, k))
+	g.passives = dict(pl.passives)
+	g.w = _StubWorld(slots)
+	g.apply_passive(pid)
+	return g

@@ -49,8 +49,9 @@ print('title sel after wheel:', g.sel)
 # ---------------------------------------------------------------- codex
 menu_pick('CODEX')
 print('scene:', g.scene)
-for i in range(5):
+for i in range(6):
 	press(pygame.K_RIGHT); step(2)
+	pygame.event.post(pygame.event.Event(pygame.MOUSEMOTION, pos=(500, 300), rel=(1,1), buttons=(0,0,0)))
 press(pygame.K_DOWN); press(pygame.K_DOWN); step(2)
 press(pygame.K_ESCAPE); step(2)
 print('scene:', g.scene)
@@ -72,6 +73,10 @@ for i in range(60 * 60 * 7):
 	if g.scene == 'levelup':
 		seen.add('levelup')
 		if i % 7 == 0: wheel(random.choice((1, -1)))
+		if i % 11 == 3:
+			seen.add('lvtree'); press(pygame.K_t); press(pygame.K_t)
+		if i % 9 == 0 and g.levelup and g.levelup.buttons:
+			click(random.choice(g.levelup.buttons)[0].center)
 		if i % 4 == 0:
 			press(random.choice([pygame.K_RETURN, pygame.K_r, pygame.K_x,
 			                     pygame.K_TAB, pygame.K_ESCAPE]))
@@ -94,6 +99,9 @@ for i in range(60 * 60 * 7):
 		if i % 500 == 41: press(pygame.K_F5)
 	elif g.scene == 'pause':
 		seen.add('pause')
+		press(pygame.K_t if 'tree' not in seen else pygame.K_ESCAPE)
+	elif g.scene == 'tree':
+		seen.add('tree')
 		press(pygame.K_ESCAPE)
 	elif g.scene == 'end':
 		seen.add('end')
@@ -125,11 +133,16 @@ print('scene:', g.scene, 'sandbox?', g.sandbox is not None)
 sb = g.sandbox
 for tab in range(5):
 	press(pygame.K_1 + tab); step(2)
-	for r, _l, _fn, _c, _o in list(sb.buttons):
-		click(r.center); step(1)
+	for b in list(sb.buttons):
+		if b[2] == 'start': continue
+		click(b[0].center); step(1)
 	for c in list(sb.cards)[:14]:
 		click(c[0].center, 1 if random.random() < 0.7 else 3)
 		step(1)
+	for r in list(sb.pacerects) + list(sb.bootrects) + [q[0] for q in sb.slotrects]:
+		click(r.center); step(1)
+	if sb.killrects:
+		click(sb.killrects[-1].center); step(1)
 	press(pygame.K_RETURN); press(pygame.K_DOWN); press(pygame.K_e); step(2)
 press(pygame.K_TAB); step(1)
 print('scene after TAB:', g.scene)

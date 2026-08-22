@@ -4,18 +4,20 @@ import math, random
 import pygame
 from core.settings import *
 from core.utils import *
-from game.weapons import E, O, SYN, EVO_BY_EMIT, PASSIVE_BY_ID, MAX_OPS_PER_PROC
+from game.weapons import (E, O, SYN, EVO_BY_EMIT, EMIT_ORDER, PASSIVE_BY_ID,
+                          MAX_OPS_PER_PROC, ghost_process)
 
 ROMAN = ('', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII')
-GRACE = 0.4     # input lock when the level-up screen opens, anti-misclick
+GRACE = 0.6     # input lock when the level-up screen opens, anti-misclick
 
 CONTROLS = (
 	('WASD / arrows', 'move'),
 	('hold LMB', 'move toward cursor'),
-	('SPACE / RMB', 'dash (brief i-frames)'),
+	('SPACE / RMB', 'dash or blink'),
 	('ESC or P', 'pause / this screen'),
 	('1-5 or click', 'pick an upgrade'),
-	('R / X / TAB', 'reroll / banish / skip'),
+	('R / X / ESC', 'reroll / banish / skip'),
+	('T', 'the evolution tree'),
 	('TAB (sandbox)', 'open the bench'),
 	('F11 or Alt+Enter', 'fullscreen'),
 	('F5', 'mouse mode: pointer or drag'),
@@ -32,6 +34,14 @@ def rk(n): return ROMAN[n] if n < len(ROMAN) else str(n)
 
 def trim(s, n):
 	return s if len(s) <= n else s[:n - 2] + '..'
+
+
+def fit(dst, txt, x, y, size, col, bold, width, anchor='tl', floor=9):
+	"""Shrink to fit rather than cut. Names in this game carry their whole build;
+	an ellipsis in the middle of one throws away the part that was earned."""
+	while size > floor and text_w(txt, size, bold) > width:
+		size -= 1
+	return draw_text(dst, txt, x, y, size, col, bold, anchor)
 
 
 def pips(s, x, y, cur, mx, col, size=7, gap=4):
@@ -306,6 +316,14 @@ def _passive_art(s, rect, key, col, t, ph):
 			c = col if i < 2 else shade(col, 0.35)
 			pygame.draw.rect(s, c, (cx - 46 + i * 32, cy - 12, 24, 24), 2, 4)
 		draw_text(s, '+1', cx + 34, cy - 9, 16, col, True)
+	elif key in ('luck', 'xp', 'reroll'):
+		for i in range(7):
+			f = (ph + i * 0.14) % 1.0
+			xx = x + 20 + (w_ - 40) * ((i * 0.37) % 1.0)
+			_dot(s, xx, y + 8 + f * (h_ - 20), 3.5, mix(col, GOLD, f), 1.0 - f * 0.5)
+		blit_glow(s, cx, cy, 24, col, 0.5)
+		g = text(PASSIVE_BY_ID[key]['glyph'], 22, col, True)
+		s.blit(g, (cx - g.get_width() * 0.5, cy - g.get_height() * 0.5))
 	elif key == 'dodge':
 		for i in range(3):
 			al = 1.0 - i * 0.3
@@ -394,6 +412,10 @@ def _emit_art(s, rect, key, col, t, ph):
 
 
 # ========================================================== WEAPON SCENES
+# A card must not be a label with a decoration on it: it has to RUN the weapon.
+# Every scene below takes the real stats of the process being offered (count,
+# cadence, size) plus its real op set, so two evolutions of one emitter can never
+# come out looking like the same animation in a different tint.
 _FOE_DIR = ((0.50, 0.20), (0.68, 0.50), (0.48, 0.80), (0.86, 0.32), (0.84, 0.72))
 
 
@@ -407,30 +429,45 @@ def _scene_box(s, rect):
 	pygame.draw.rect(s, (30, 36, 52), rect, 1, 6)
 
 
-def _agent(s, ax, ay, t):
-	blit_glow(s, ax, ay, 16, CYAN, 0.5)
-	a = math.sin(t * 1.7) * 0.3
-	pygame.draw.polygon(s, CYAN, [(ax + math.cos(a) * 9, ay + math.sin(a) * 9),
-	                              (ax + math.cos(a + 2.5) * 7, ay + math.sin(a + 2.5) * 7),
-	                              (ax + math.cos(a - 2.5) * 7, ay + math.sin(a - 2.5) * 7)])
+def _agent(s, ax, ay, t, shape='dart', col=CYAN):
+	blit_glow(s, ax, ay, 16, col, 0.5)
+	agent_shape(s, ax, ay, math.sin(t * 1.7) * 0.3, shape, col, 8.0, t)
 
 
-def _weapon_scene(s, rect, emit, col, t, mods=None):
-	"""What the weapon actually does, at its real count and cadence.
+def _curve(ax, ay, tx, ty, f, ops, t, i):
+	"""Where a projectile is at 0..1 along its flight, bent by whatever ops the
+	process is carrying. This is why HOMING and BOUNCE and SPIN read differently
+	on the card instead of all being a straight line."""
+	x = ax + (tx - ax) * f
+	y = ay + (ty - ay) * f
+	dx = tx - ax; dy = ty - ay
+	L = math.hypot(dx, dy) or 1.0
+	nx = -dy / L; ny = dx / L
+	off = 0.0
+	if ops.get('homing'):
+		off += math.sin(f * math.pi) * 30.0 * (1.0 - f) * (1 if i % 2 == 0 else -1)
+	if ops.get('bounce'):
+		off += (1.0 - abs((f * 3.0 % 1.0) * 2.0 - 1.0)) * 22.0 * (1 if int(f * 3) % 2 == 0 else -1)
+	if ops.get('orbitize'):
+		off += math.sin(f * 9.0 + t * 3.0 + i) * 16.0 * f
+	return x + nx * off, y + ny * off
 
-	The numbers come from the emitter table, not from the drawing: the loop is its
-	cooldown, the projectile count is its count, and the foes light up when they
-	are actually in the path. A card should not be a label, it should be the thing
-	running."""
+
+def _weapon_scene(s, rect, emit, col, t, ops=None, st=None, shape='dart', pcol=CYAN):
 	from game.weapons import E
 	em = E.get(emit)
 	x, y, w_, h_ = rect
 	_scene_box(s, rect)
 	if em is None: return
+	ops = dict(ops or {})
+	cd = st['cd'] if st else em['cd']
+	n = int(st['count']) if st else int(em['count'])
+	n = max(1, min(8, n))
+	base_sz = em['size'] or 1.0
+	szf = clamp((st['size'] / base_sz) if st else 1.0, 0.55, 2.2)
 	cx = x + w_ * 0.5; cy = y + h_ * 0.5
-	period = clamp(em['cd'] * 1.25, 0.8, 2.1)
+	period = clamp(cd * 1.25, 0.34, 2.1)
 	ph = (t % period) / period
-	n = min(6, max(1, int(em['count'])))
 	radial = emit in ('orbit', 'aura', 'nova', 'spiral', 'beam', 'turret', 'rain')
 	ax = cx if radial else x + w_ * 0.16
 	ay = cy
@@ -443,23 +480,42 @@ def _weapon_scene(s, rect, emit, col, t, mods=None):
 	else:
 		for fx_, fy_ in _FOE_DIR:
 			foes.append([x + w_ * fx_ + w_ * 0.08, y + h_ * fy_, False])
+	pierce = ops.get('pierce', 0) + (3 if emit == 'flame' else (2 if emit == 'blade' else 0))
+	old = s.get_clip()
+	s.set_clip(pygame.Rect(int(x) + 1, int(y) + 1, int(w_) - 2, int(h_) - 2))
 
 	if emit == 'bolt':
 		for i in range(n):
-			f = (ph + i * 0.34) % 1.0
-			px = ax + 14 + f * (w_ * 0.84)
-			if px > x + w_ - 6: continue
-			pygame.draw.line(s, shade(col, 0.4), (px - 16, cy), (px, cy), 3)
-			_dot(s, px, cy, 4, col)
+			f = (ph + i / float(n)) % 1.0
+			tx = x + w_ - 8; ty = cy + (i - (n - 1) * 0.5) * 13
+			px, py = _curve(ax, ay, tx, ty, f, ops, t, i)
+			pygame.draw.line(s, shade(col, 0.4), (px - 15, py), (px, py), max(2, int(3 * szf)))
+			_dot(s, px, py, 4 * szf, col)
 			for q in foes:
-				if abs(q[1] - cy) < 15 and q[0] < px: q[2] = True
+				if abs(q[1] - py) < 16 and q[0] < px and (pierce or not q[2]): q[2] = True
+	elif emit == 'flame':
+		# a cone, not a volley: the damage is in the overlap
+		reach = w_ * 0.62 * (1.0 + 0.12 * ops.get('giant', 0))
+		cone = 0.52 + 0.09 * ops.get('multishot', 0)
+		for i in range(n * 3):
+			f = ((t * 2.4 + i * 0.11) % 1.0)
+			a = (i * 2.399) % (cone * 2) - cone
+			d = f * reach
+			px = ax + math.cos(a) * d; py = ay + math.sin(a) * d * 0.8
+			r = (3.0 + f * 9.0) * szf
+			blit_glow(s, px, py, r * 2.2, mix((255, 220, 120), col, min(1.0, f * 1.4)), 0.9 - f * 0.45)
+		for q in foes:
+			d = math.hypot(q[0] - ax, q[1] - ay)
+			a = math.atan2(q[1] - ay, q[0] - ax)
+			if d < reach and abs(a) < cone: q[2] = True
 	elif emit == 'swarm':
-		for i in range(n + 1):
-			f = (ph + i / (n + 1.0)) % 1.0
+		for i in range(n):
+			f = (ph + i / float(n)) % 1.0
 			tgt = foes[i % len(foes)]
-			px = ax + (tgt[0] - ax) * f
-			py = ay + (tgt[1] - ay) * f + math.sin(f * 7 + i * 2) * 12 * (1 - f)
-			_dot(s, px, py, 3, col, 0.9)
+			px, py = _curve(ax, ay, tgt[0], tgt[1], f, ops, t, i)
+			if not ops.get('homing'):
+				py += math.sin(f * 7 + i * 2) * 12 * (1 - f)
+			_dot(s, px, py, 3 * szf, col, 0.9)
 			if f > 0.88: tgt[2] = True
 	elif emit == 'orbit':
 		pygame.draw.ellipse(s, shade(col, 0.22), pygame.Rect(int(ax - rx), int(ay - ry),
@@ -467,33 +523,37 @@ def _weapon_scene(s, rect, emit, col, t, mods=None):
 		for i in range(n):
 			a = t * 2.0 + i * TAU / n
 			px = ax + math.cos(a) * rx; py = ay + math.sin(a) * ry
-			blit_glow(s, px, py, 12, col, 0.85)
-			pygame.draw.circle(s, WHITE, (int(px), int(py)), 3)
+			blit_glow(s, px, py, 12 * szf, col, 0.85)
+			pygame.draw.circle(s, WHITE, (int(px), int(py)), max(2, int(3 * szf)))
 			for q in foes:
-				if abs(q[0] - px) < 15 and abs(q[1] - py) < 15: q[2] = True
+				if abs(q[0] - px) < 15 * szf and abs(q[1] - py) < 15 * szf: q[2] = True
 	elif emit == 'aura':
-		r = min(rx, ry) * (1.2 + 0.10 * math.sin(t * 3.4))
+		r = min(rx, ry) * (1.2 + 0.10 * math.sin(t * 3.4)) * szf
 		g = hollow_glow(int(r), col, 0.55)
 		s.blit(g, (ax - g.get_width() * 0.5, ay - g.get_height() * 0.5), None, pygame.BLEND_ADD)
 		pygame.draw.circle(s, shade(col, 0.9), (int(ax), int(ay)), int(r), 2)
 		for q in foes:
 			if math.hypot(q[0] - ax, q[1] - ay) < r: q[2] = True
 	elif emit == 'nova':
-		r = ph * max(rx, ry) * 1.6
-		pygame.draw.circle(s, shade(col, 1.0 - ph), (int(ax), int(ay)), int(r) + 1, 3)
-		pygame.draw.circle(s, shade(WHITE, (1.0 - ph) * 0.8), (int(ax), int(ay)), int(r) + 1, 1)
-		for q in foes:
-			if math.hypot(q[0] - ax, q[1] - ay) < r: q[2] = True
+		for k in range(max(1, n // 2)):
+			pk = (ph + k * 0.18) % 1.0
+			r = pk * max(rx, ry) * 1.6 * szf
+			pygame.draw.circle(s, shade(col, 1.0 - pk), (int(ax), int(ay)), int(r) + 1, 3)
+			pygame.draw.circle(s, shade(WHITE, (1.0 - pk) * 0.8), (int(ax), int(ay)), int(r) + 1, 1)
+			for q in foes:
+				if math.hypot(q[0] - ax, q[1] - ay) < r: q[2] = True
 	elif emit == 'beam':
-		a = t * 1.3
-		L = max(rx, ry) * 1.7
-		ex = ax + math.cos(a) * L; ey = ay + math.sin(a) * L
-		pygame.draw.line(s, shade(col, 0.45), (ax, ay), (ex, ey), 7)
-		pygame.draw.line(s, col, (ax, ay), (ex, ey), 3)
-		pygame.draw.line(s, WHITE, (ax, ay), (ex, ey), 1)
-		for q in foes:
-			d = abs(math.atan2(q[1] - ay, q[0] - ax) - a % TAU)
-			if min(d % TAU, TAU - (d % TAU)) < 0.35: q[2] = True
+		nb = max(1, min(4, n // 2))
+		L = max(rx, ry) * 1.7 * szf
+		for k in range(nb):
+			a = t * 1.3 + k * TAU / nb
+			ex = ax + math.cos(a) * L; ey = ay + math.sin(a) * L
+			pygame.draw.line(s, shade(col, 0.45), (ax, ay), (ex, ey), int(7 * szf))
+			pygame.draw.line(s, col, (ax, ay), (ex, ey), int(3 * szf))
+			pygame.draw.line(s, WHITE, (ax, ay), (ex, ey), 1)
+			for q in foes:
+				d = abs(math.atan2(q[1] - ay, q[0] - ax) - a % TAU)
+				if min(d % TAU, TAU - (d % TAU)) < 0.35: q[2] = True
 	elif emit == 'mine':
 		for i in range(n + 1):
 			f = (ph + i * 0.3) % 1.0
@@ -501,16 +561,17 @@ def _weapon_scene(s, rect, emit, col, t, mods=None):
 			if mx > x + w_ - 10: continue
 			if f < 0.72:
 				pulse = 0.4 + 0.6 * abs(math.sin(t * 7 + i))
-				blit_glow(s, mx, my, 11 * pulse, col, 0.9)
-				pygame.draw.circle(s, col, (int(mx), int(my)), 6, 2)
+				blit_glow(s, mx, my, 11 * pulse * szf, col, 0.9)
+				pygame.draw.circle(s, col, (int(mx), int(my)), int(6 * szf), 2)
 			else:
 				rr = (f - 0.72) / 0.28
-				pygame.draw.circle(s, shade(col, 1 - rr), (int(mx), int(my)), int(6 + rr * 20), 2)
+				pygame.draw.circle(s, shade(col, 1 - rr), (int(mx), int(my)), int((6 + rr * 20) * szf), 2)
 				for q in foes:
-					if math.hypot(q[0] - mx, q[1] - my) < 6 + rr * 20: q[2] = True
+					if math.hypot(q[0] - mx, q[1] - my) < (6 + rr * 20) * szf: q[2] = True
 	elif emit == 'arc':
-		order = sorted(foes, key=lambda q: math.hypot(q[0] - ax, q[1] - ay))[:4]
-		reach = int(ph * 4) + 1
+		jumps = 2 + ops.get('chain', 0)
+		order = sorted(foes, key=lambda q: math.hypot(q[0] - ax, q[1] - ay))[:jumps + 1]
+		reach = int(ph * (jumps + 1)) + 1
 		prev = (ax, ay)
 		for i, q in enumerate(order[:reach]):
 			mid = ((prev[0] + q[0]) * 0.5 + math.sin(t * 11 + i) * 7,
@@ -520,34 +581,38 @@ def _weapon_scene(s, rect, emit, col, t, mods=None):
 			q[2] = True
 			prev = (q[0], q[1])
 	elif emit == 'turret':
-		for i in (-1, 1):
-			tx = ax + w_ * 0.15 * i; ty = ay + h_ * 0.22 * i
-			g = ngon(4, 8, col, 2, t * 1.6)
+		nt = max(2, min(4, n))
+		for k in range(nt):
+			a = k * TAU / nt + 0.6
+			tx = ax + math.cos(a) * w_ * 0.17; ty = ay + math.sin(a) * h_ * 0.24
+			g = ngon(4, int(8 * szf), col, 2, t * 1.6)
 			s.blit(g, (tx - g.get_width() * 0.5, ty - g.get_height() * 0.5))
 			blit_glow(s, tx, ty, 12, col, 0.6)
-			q = foes[(0 if i < 0 else 3) % len(foes)]
-			f = (ph + (0.5 if i > 0 else 0.0)) % 1.0
-			px = tx + (q[0] - tx) * f; py = ty + (q[1] - ty) * f
-			_dot(s, px, py, 3, col, 0.9)
+			q = foes[k % len(foes)]
+			f = (ph + k * 0.31) % 1.0
+			px, py = _curve(tx, ty, q[0], q[1], f, ops, t, k)
+			_dot(s, px, py, 3 * szf, col, 0.9)
 			if f > 0.85: q[2] = True
 	elif emit == 'blade':
-		f = math.sin(ph * math.pi)
-		bx = ax + 16 + f * (w_ * 0.64)
-		by = cy - math.sin(ph * TAU) * h_ * 0.16
+		for i in range(min(4, n)):
+			pk = (ph + i / float(min(4, n))) % 1.0
+			f = math.sin(pk * math.pi)
+			bx = ax + 16 + f * (w_ * 0.64)
+			by = cy - math.sin(pk * TAU) * h_ * 0.16 + (i - (n - 1) * 0.5) * 9
+			g = ngon(3, int(12 * szf), col, 0, t * 7 + i)
+			s.blit(g, (bx - g.get_width() * 0.5, by - g.get_height() * 0.5), None, pygame.BLEND_ADD)
+			for q in foes:
+				if math.hypot(q[0] - bx, q[1] - by) < 20 * szf: q[2] = True
 		pygame.draw.arc(s, shade(col, 0.35), pygame.Rect(int(ax + 8), int(cy - h_ * 0.34),
 		                                                 int(w_ * 0.72), int(h_ * 0.68)), 0.2, 3.0, 1)
-		g = ngon(3, 12, col, 0, t * 7)
-		s.blit(g, (bx - g.get_width() * 0.5, by - g.get_height() * 0.5), None, pygame.BLEND_ADD)
-		for q in foes:
-			if math.hypot(q[0] - bx, q[1] - by) < 20: q[2] = True
 	elif emit == 'spiral':
 		for i in range(n + 2):
 			f = (ph + i / (n + 2.0)) % 1.0
 			a = t * 1.8 + i * TAU / (n + 2) + f * 3.4
 			px = ax + math.cos(a) * rx * f * 1.6; py = ay + math.sin(a) * ry * f * 1.6
-			_dot(s, px, py, 3.4, col, 0.9)
+			_dot(s, px, py, 3.4 * szf, col, 0.9)
 			for q in foes:
-				if math.hypot(q[0] - px, q[1] - py) < 13: q[2] = True
+				if math.hypot(q[0] - px, q[1] - py) < 13 * szf: q[2] = True
 	elif emit == 'rain':
 		for i in range(n + 1):
 			f = (ph + i * 0.27) % 1.0
@@ -555,71 +620,81 @@ def _weapon_scene(s, rect, emit, col, t, mods=None):
 			if f < 0.62:
 				sy = y + 4 + (q[1] - y - 4) * (f / 0.62)
 				pygame.draw.line(s, col, (q[0], sy - 12), (q[0], sy), 3)
-				pygame.draw.circle(s, shade(col, 0.5), (int(q[0]), int(q[1])), 9, 1)
+				pygame.draw.circle(s, shade(col, 0.5), (int(q[0]), int(q[1])), int(9 * szf), 1)
 			else:
 				rr = (f - 0.62) / 0.38
-				pygame.draw.circle(s, shade(col, 1 - rr), (int(q[0]), int(q[1])), int(4 + rr * 18), 2)
+				pygame.draw.circle(s, shade(col, 1 - rr), (int(q[0]), int(q[1])), int((4 + rr * 18) * szf), 2)
 				q[2] = True
 	else:
 		g = text('?', 26, col, True)
 		s.blit(g, (cx - g.get_width() * 0.5, cy - g.get_height() * 0.5))
 
+	# ---- what the ops do once something is hit
 	hitpos = [q for q in foes if q[2]]
-	if mods:
-		# what the ops do to a hit, so two evolutions of one emitter never read alike
-		pulse = 0.5 + 0.5 * math.sin(t * 5.0)
-		for i, q in enumerate(hitpos):
-			if 'blast' in mods:
-				pygame.draw.circle(s, shade(ORANGE, 0.9 - 0.5 * pulse),
-				                   (int(q[0]), int(q[1])), int(9 + 9 * pulse), 2)
-			if 'split' in mods:
-				for k in range(3):
-					a = t * 3 + k * 2.1
-					_dot(s, q[0] + math.cos(a) * 13, q[1] + math.sin(a) * 13, 2.2, col, 0.9)
-			if 'frost' in mods:
-				pygame.draw.circle(s, (120, 210, 255), (int(q[0]), int(q[1])), 11, 1)
-			if 'burn' in mods:
-				for k in range(2):
-					_dot(s, q[0] + math.sin(t * 6 + k * 3) * 5, q[1] - 8 - ((t * 22 + k * 11) % 16),
-					     2.0, (255, 150, 60), 0.9)
-			if 'void' in mods:
-				pygame.draw.circle(s, VIOLET, (int(q[0]), int(q[1])), int(14 - 6 * pulse), 1)
-			if 'shock' in mods and i + 1 < len(hitpos):
-				n2 = hitpos[i + 1]
-				pygame.draw.line(s, (150, 220, 255), (q[0], q[1]), (n2[0], n2[1]), 1)
-		if 'chain' in mods:
-			for i in range(len(hitpos) - 1):
-				pygame.draw.line(s, WHITE, (hitpos[i][0], hitpos[i][1]),
-				                 (hitpos[i + 1][0], hitpos[i + 1][1]), 1)
-		if 'crit' in mods and hitpos:
-			q = hitpos[0]
-			g = text('x%d' % (2 + int(pulse * 2)), 12, GOLD, True)
-			s.blit(g, (q[0] + 8, q[1] - 18))
+	pulse = 0.5 + 0.5 * math.sin(t * 5.0)
+	for i, q in enumerate(hitpos):
+		if ops.get('blast'):
+			pygame.draw.circle(s, shade(ORANGE, 0.9 - 0.5 * pulse),
+			                   (int(q[0]), int(q[1])), int((9 + 9 * pulse) * (1 + 0.2 * ops['blast'])), 2)
+		if ops.get('split'):
+			for k in range(2 + ops['split']):
+				a = t * 3 + k * 2.1
+				_dot(s, q[0] + math.cos(a) * 13, q[1] + math.sin(a) * 13, 2.2, col, 0.9)
+		if ops.get('frost'):
+			pygame.draw.circle(s, (120, 210, 255), (int(q[0]), int(q[1])), 11, 1)
+			for k in range(4):
+				a = k * TAU / 4 + t * 0.4
+				pygame.draw.line(s, (120, 210, 255), (q[0] + math.cos(a) * 7, q[1] + math.sin(a) * 7),
+				                 (q[0] + math.cos(a) * 13, q[1] + math.sin(a) * 13), 1)
+		if ops.get('burn'):
+			for k in range(2):
+				_dot(s, q[0] + math.sin(t * 6 + k * 3) * 5, q[1] - 8 - ((t * 22 + k * 11) % 16),
+				     2.0, (255, 150, 60), 0.9)
+		if ops.get('void'):
+			pygame.draw.circle(s, VIOLET, (int(q[0]), int(q[1])), int(15 - 7 * pulse), 1)
+		if ops.get('corrupt'):
+			for k in range(3):
+				a = t * 2.2 + k * 2.1
+				_dot(s, q[0] + math.cos(a) * (6 + 10 * pulse), q[1] + math.sin(a) * (6 + 10 * pulse),
+				     2.6, VIOLET, 0.95)
+		if ops.get('recursion'):
+			f2 = (t * 1.6 + i * 0.4) % 1.0
+			_dot(s, q[0] + math.cos(f2 * 5.0) * 18 * f2, q[1] - 16 * f2, 2.6, (180, 255, 200), 1 - f2)
+		if ops.get('drain') and i == 0:
+			f2 = (t * 0.9) % 1.0
+			_dot(s, q[0] + (ax - q[0]) * f2, q[1] + (ay - q[1]) * f2 - math.sin(f2 * math.pi) * 14,
+			     3.0, HP_COL, 1.0)
+		if ops.get('shock') and i + 1 < len(hitpos):
+			n2 = hitpos[i + 1]
+			pygame.draw.line(s, (150, 220, 255), (q[0], q[1]), (n2[0], n2[1]), 1)
+	if ops.get('chain') and emit != 'arc':
+		for i in range(min(len(hitpos) - 1, ops['chain'])):
+			pygame.draw.line(s, WHITE, (hitpos[i][0], hitpos[i][1]),
+			                 (hitpos[i + 1][0], hitpos[i + 1][1]), 1)
+	if ops.get('crit') and hitpos:
+		q = hitpos[0]
+		g = text('CRIT', 11, GOLD, True)
+		g.set_alpha(int(120 + 135 * pulse))
+		s.blit(g, (q[0] + 8, q[1] - 20))
+	if ops.get('echo'):
+		g = text('x2', 12, shade(col, 0.5 + 0.5 * pulse), True)
+		s.blit(g, (x + 8, y + h_ - 20))
+	if ops.get('overclock'):
+		bw = int(w_ * 0.3)
+		pygame.draw.rect(s, (30, 20, 20), (x + w_ - bw - 8, y + h_ - 12, bw, 5), 0, 2)
+		pygame.draw.rect(s, RED, (x + w_ - bw - 8, y + h_ - 12, int(bw * pulse), 5), 0, 2)
+
 	for q in foes:
 		_foe(s, q[0], q[1], (150, 160, 190), 7, q[2])
 		if q[2]: blit_glow(s, q[0], q[1], 11, col, 0.5)
-	_agent(s, ax, ay, t)
+	_agent(s, ax, ay, t, shape, pcol)
+	s.set_clip(old)
 
 
-def _fuse_scene(s, rect, ea, eb, col, t):
-	"""Two processes going in, one coming out."""
-	x, y, w_, h_ = rect
-	half = int(w_ * 0.5) - 5
-	loop = (t * 0.45) % 1.0
-	if loop < 0.62:
-		_weapon_scene(s, (x, y, half, h_), ea, col, t)
-		_weapon_scene(s, (x + half + 10, y, half, h_), eb, MAGENTA, t)
-		a = clamp((loop - 0.42) / 0.20, 0.0, 1.0)
-		if a > 0:
-			blit_glow(s, x + w_ * 0.5, y + h_ * 0.5, 12 + 46 * a, MAGENTA, a)
-	else:
-		f = (loop - 0.62) / 0.38
-		_weapon_scene(s, (x, y, w_, h_), ea, mix(col, MAGENTA, 0.5), t)
-		g = ring(int(8 + f * w_ * 0.5), MAGENTA, 2, int(220 * (1 - f)))
-		s.blit(g, (x + w_ * 0.5 - g.get_width() * 0.5, y + h_ * 0.5 - g.get_height() * 0.5),
-		       None, pygame.BLEND_ADD)
-		draw_text(s, 'MERGED', x + w_ * 0.5, y + 5, 12,
-		          shade(MAGENTA, 0.6 + 0.4 * (1 - f)), True, 'tc')
+def _emit_scene_of(s, rect, pr, col, t, pl=None, shape='dart', pcol=CYAN):
+	"""Run one live Process in a box, at its real numbers."""
+	st = pr.stats(pl) if pl is not None else None
+	_weapon_scene(s, rect, pr.emit, col, t, pr.ops, st, shape, pcol)
 
 
 def panel(s, rect, alpha=210, border=LINE, radius=8, fill=PANEL):
@@ -803,9 +878,7 @@ def draw_proc_row(w, s, x, y, pr):
 	f = 1.0 - clamp(pr.t / max(0.001, c['cd']), 0.0, 1.0)
 	pygame.draw.rect(s, shade(col, 0.8), (x, y + size + 2, int(size * f), 2))
 	# name
-	nm = pr.name
-	if len(nm) > 30: nm = nm[:29] + '.'
-	draw_text(s, nm, x + size + 8, y + 1, 12, GOLD if pr.evo else INK, bool(pr.evo))
+	fit(s, pr.name, x + size + 8, y + 1, 12, GOLD if pr.evo else INK, bool(pr.evo), 246, 'tl', 8)
 	# ops
 	ox = x + size + 8
 	oy = y + 16
@@ -834,9 +907,12 @@ class LevelUp:
 		self.done = None
 		self.snap = None
 		self.rects = []
+		self.buttons = []        # [(rect, key, label, sub, col, enabled)]
 		self.avoid = []          # keys of the last two rerolls, kept off the table
-		self.tree = []
-		self.tree_hover = None
+		self.tree = False        # the full combination tree, over the top
+		self.tree_scroll = 0
+		self.tree_max = 0
+		self.tree_sel = 0
 
 	def snapshot(self, s):
 		small = pygame.transform.smoothscale(s, (W // 6, H // 6))
@@ -845,16 +921,30 @@ class LevelUp:
 		dark.fill((6, 8, 14)); dark.set_alpha(160)
 		self.snap.blit(dark, (0, 0))
 
+	# ------------------------------------------------------------------ input
 	def event(self, ev, w):
 		# Commit actions are locked for GRACE seconds so a click or keypress meant
 		# for the fight cannot pick an upgrade the instant the screen appears.
 		live = self.t >= GRACE
+		if self.tree:
+			if ev.type == pygame.KEYDOWN:
+				if ev.key in (pygame.K_t, pygame.K_ESCAPE, pygame.K_TAB): self.tree = False
+				elif ev.key in (pygame.K_DOWN, pygame.K_s): self.tree_scroll += 70
+				elif ev.key in (pygame.K_UP, pygame.K_w): self.tree_scroll -= 70
+			elif ev.type == pygame.MOUSEWHEEL:
+				self.tree_scroll -= ev.y * 60
+			elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 3:
+				self.tree = False
+			self.tree_scroll = clamp(self.tree_scroll, 0, max(0, self.tree_max))
+			return
 		if ev.type == pygame.KEYDOWN:
 			n = len(self.offers)
 			if ev.key in (pygame.K_LEFT, pygame.K_a):
 				self.sel = (self.sel - 1) % n; w.audio.play('move', 0.6)
 			elif ev.key in (pygame.K_RIGHT, pygame.K_d):
 				self.sel = (self.sel + 1) % n; w.audio.play('move', 0.6)
+			elif ev.key == pygame.K_t:
+				self.tree = True; self.tree_scroll = 0
 			elif not live:
 				return
 			elif ev.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_e):
@@ -876,7 +966,17 @@ class LevelUp:
 				if r.collidepoint(ev.pos):
 					if self.sel != i: w.audio.play('move', 0.4)
 					self.sel = i
-		elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and live:
+		elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+			for r, key, _l, _s, _c, on in self.buttons:
+				if r.collidepoint(ev.pos):
+					if key == 'tree':
+						self.tree = True; self.tree_scroll = 0
+						w.audio.play('move', 0.7); return
+					if not live or not on:
+						w.audio.play('deny', 0.7); return
+					{'reroll': self.reroll, 'banish': self.banish, 'skip': self.skip}[key](w)
+					return
+			if not live: return
 			for i, r in enumerate(self.rects):
 				if r.collidepoint(ev.pos):
 					self.sel = i; self.pick(w); return
@@ -912,18 +1012,20 @@ class LevelUp:
 		w.audio.play('deny', 1.0)
 
 	def skip(self, w):
-		w.player.heal(12)
+		w.player.heal(w.player.maxhp)
 		w.audio.play('pick', 0.6)
 		self.done = 'skipped'
 
 	def update(self, dt):
 		self.t += dt
 
+	# ------------------------------------------------------------------- draw
 	def draw(self, s, w):
 		if self.snap: s.blit(self.snap, (0, 0))
 		else: s.fill((6, 8, 14))
 		t = min(1.0, self.t * 3.4)
 		e = ease_out(t)
+		mouse = pygame.mouse.get_pos()
 
 		draw_text(s, 'EPOCH %d' % w.player.level, CX, int(26 - 14 * (1 - e)), 30, INK, True, 'tc')
 		locked = self.t < GRACE
@@ -933,12 +1035,14 @@ class LevelUp:
 
 		n = len(self.offers)
 		gap = 14
-		cw = int(min(320, (W - 56 - (n - 1) * gap) / n))
-		ch = int(clamp((H - 150) * 0.58, 300, 460))
+		cw = int(min(322, (W - 56 - (n - 1) * gap) / n))
+		fy = H - 52
+		pvh = int(clamp(H * 0.36, 196, 330))
+		pvy = fy - pvh - 12
 		cy = 92
+		ch = int(clamp(pvy - cy - 12, 210, 430))
 		x0 = CX - (n * cw + (n - 1) * gap) * 0.5
 		self.rects = []
-		mouse = pygame.mouse.get_pos()
 
 		for i, o in enumerate(self.offers):
 			x = x0 + i * (cw + gap)
@@ -946,30 +1050,40 @@ class LevelUp:
 			self.rects.append(r)
 			self.draw_card(s, o, r, i == self.sel, e, i, n)
 
-		# --- what the selected card leads to, in the space nobody was using
-		ty = cy + ch + 12
-		th = int(clamp(H - ty - 42, 120, 380))
-		if th > 110 and self.offers:
-			draw_tree(s, (28, ty, W - 56, th), w, self.offers[clamp(self.sel, 0, n - 1)],
-			          self.t, mouse)
+		# --- everything the selected card actually is, in the space nobody used
+		if self.offers:
+			draw_preview(s, (28, pvy, W - 56, pvh), w,
+			             self.offers[clamp(self.sel, 0, n - 1)], self.t)
 
+		self.draw_buttons(s, w, fy, mouse, locked)
+		if self.tree:
+			self.tree_max = draw_tree_screen(s, self.t, self.tree_scroll, mouse, w, True)
+
+	# ---------------------------------------------------------------- buttons
+	def draw_buttons(self, s, w, y, mouse, locked):
+		"""Reroll used to be a keyboard-only verb, which made the most common
+		action on this screen the one you had to leave the mouse for."""
 		pl = w.player
-		fy = H - 30
-		dim = self.t < GRACE
-		items = [('ENTER / CLICK', 'take', INK_FAINT if dim else INK),
-		         ('R', 'reroll (%d)' % pl.rerolls, INK_FAINT if dim else (GOLD if pl.rerolls else INK_FAINT)),
-		         ('X', 'banish (%d)' % pl.banishes, INK_FAINT if dim else (VIOLET if pl.banishes else INK_FAINT)),
-		         ('TAB / ESC', 'skip +12 hp', INK_DIM)]
-		tw = sum(text_w(a + '  ' + b, 13) + 34 for a, b in [(a, b) for a, b, _ in items])
-		fx_ = CX - tw * 0.5
-		for key, lbl, col in items:
-			g = text(key, 13, col, True)
-			s.blit(g, (fx_, fy))
-			fx_ += g.get_width() + 7
-			g = text(lbl, 13, INK_FAINT)
-			s.blit(g, (fx_, fy))
-			fx_ += g.get_width() + 27
+		self.buttons = []
+		defs = [('reroll', 'REROLL', 'R  -  %d left' % pl.rerolls, GOLD, pl.rerolls > 0),
+		        ('banish', 'BANISH', 'X  -  %d left' % pl.banishes, VIOLET, pl.banishes > 0),
+		        ('skip', 'SKIP', 'ESC  -  full repair', HP_COL, True),
+		        ('tree', 'TREE', 'T  -  every evolution', CYAN, True)]
+		bw = 208; bh = 38; g = 12
+		x = CX - (len(defs) * bw + (len(defs) - 1) * g) * 0.5
+		for key, lbl, sub, col, on in defs:
+			r = pygame.Rect(int(x), int(y), bw, bh)
+			self.buttons.append((r, key, lbl, sub, col, on))
+			live = on and (not locked or key == 'tree')
+			hot = r.collidepoint(mouse) and live
+			c = col if live else INK_FAINT
+			pygame.draw.rect(s, (24, 29, 42) if hot else (14, 18, 27), r, 0, 7)
+			pygame.draw.rect(s, c if hot else shade(c, 0.55), r, 2 if hot else 1, 7)
+			draw_text(s, lbl, r.x + 14, r.y + 6, 15, c, True)
+			draw_text(s, sub, r.right - 14, r.y + 10, 11, INK_FAINT, False, 'tr')
+			x += bw + g
 
+	# ------------------------------------------------------------------ cards
 	def draw_card(self, s, o, r, sel, e, i, n):
 		t = clamp(e * 1.4 - i * 0.10, 0.0, 1.0)
 		if t <= 0.01: return
@@ -977,7 +1091,9 @@ class LevelUp:
 		rr = pygame.Rect(r.x, r.y + off, r.w, r.h)
 		col = o.col
 		rare = RARITY_COL.get(o.rarity, INK_DIM)
-		head = 84
+		tl = wrap(o.title, 17, rr.w - 112)[:2]
+		sl = wrap(o.sub, 11, rr.w - 90)[:4]
+		head = 46 + 20 * len(tl) + 14 * len(sl)
 
 		surf = pygame.Surface((rr.w, rr.h), pygame.SRCALPHA)
 		a = int(238 * t)
@@ -992,151 +1108,392 @@ class LevelUp:
 			blit_glow(s, rr.centerx, rr.centery, 260, shade(col, 0.5), 0.30)
 
 		glyph_box(s, rr.x + 14, rr.y + 14, 48, o.glyph, col, (10, 13, 20))
-		draw_text(s, trim(o.title, int((rr.w - 100) / 9.2)), rr.x + 72, rr.y + 16, 18, INK, True)
-		draw_text(s, trim(o.sub, int((rr.w - 80) / 6.6)), rr.x + 72, rr.y + 40, 12, shade(col, 0.95))
-		kindlbl = {'op': 'OP', 'new': 'EMITTER', 'rank': 'RANK', 'passive': 'SYSTEM',
+		ty = rr.y + 15
+		for line in tl:
+			draw_text(s, line, rr.x + 72, ty, 17, INK, True)
+			ty += 20
+		for line in sl:
+			draw_text(s, line, rr.x + 72, ty + 1, 11, shade(col, 0.95))
+			ty += 14
+		kindlbl = {'op': 'OP', 'new': 'EMITTER', 'passive': 'SYSTEM',
 		           'fuse': 'FUSION', 'heal': 'REPAIR'}.get(o.kind, '')
-		draw_text(s, kindlbl, rr.x + rr.w - 14, rr.y + 62, 11, rare, True, 'tr')
+		draw_text(s, kindlbl, rr.right - 14, rr.y + head - 20, 11, rare, True, 'tr')
 		if o.kind == 'op' and o.proc is not None:
 			cur = o.proc.ops.get(o.key[3:], 0)
-			pips(s, rr.x + 72, rr.y + 62, cur + 1, MAX_TRAIT_RK, col)
-		draw_text(s, str(i + 1), rr.x + rr.w - 14, rr.y + 14, 14, INK_FAINT, True, 'tr')
+			pips(s, rr.x + 16, rr.y + head - 18, cur + 1, MAX_TRAIT_RK, col)
+		draw_text(s, str(i + 1), rr.right - 14, rr.y + 14, 14, INK_FAINT, True, 'tr')
 
-		# --- the effect, running
-		ah = int(rr.h * 0.34)
+		# --- the effect, running, at the numbers it will actually have
+		note_lines = wrap(o.note, 12, rr.w - 34) if o.note else []
+		note_h = 14 + 15 * len(note_lines)
+		note_top = rr.bottom - (note_h + 10 if note_lines else 10)
+		ah = int(clamp(rr.h * 0.42, 96, 210))
 		art = (rr.x + 12, rr.y + head + 10, rr.w - 24, ah)
-		if o.kind == 'fuse' and isinstance(o.ops_preview, tuple):
-			_scene_box(s, art)
-			_fuse_scene(s, art, o.ops_preview[0], o.ops_preview[1], col, self.t)
+		pv = o.pv or {}
+		if pv.get('mode') in ('ab', 'solo', 'fuse'):
+			_weapon_scene(s, art, pv.get('emit'), col, self.t, _rk_map(pv.get('after')),
+			              pv['ghost'].stats(self.w.player) if pv.get('ghost') else None,
+			              self.w.player.shape, self.w.player.col)
 		else:
 			art_key = o.key.split(':', 1)[1] if ':' in o.key else o.key
-			if o.kind == 'rank': art_key = o.proc.emit if o.proc else 'bolt'
 			draw_art(s, art, o.kind, art_key, col, self.t)
 
-		y = art[1] + ah + 12
-		note_lines = wrap(o.note, 12, rr.w - 34)[:2] if o.note else []
-		note_h = 18 + 15 * len(note_lines)
-		note_top = rr.y + rr.h - (note_h + 10 if note_lines else 12)
-
-		for line in wrap(o.desc, 13, rr.w - 32)[:3]:
+		y = art[1] + ah + 10
+		for line in wrap(o.desc, 13, rr.w - 32):
+			if y + 15 > note_top - 4: break
 			draw_text(s, line, rr.x + 16, y, 13, INK_DIM)
-			y += 17
-
-		if o.proc is not None and o.kind in ('op', 'rank', 'fuse'):
-			y += 8
-			if y + 30 < note_top:
-				pygame.draw.line(s, LINE, (rr.x + 16, y - 6), (rr.x + rr.w - 16, y - 6))
-				draw_text(s, 'PROCESS STATE', rr.x + 16, y, 10, INK_FAINT, True)
-				y += 15
-				ox = rr.x + 16
-				for k, v in sorted(o.proc.ops.items(), key=lambda kv: -kv[1]):
-					d = O[k]
-					cc = d['col'] or INK_DIM
-					g = text(d['glyph'] + rk(v), 13, cc, True)
-					if ox + g.get_width() + 6 > rr.x + rr.w - 16:
-						ox = rr.x + 16; y += 16
-					s.blit(g, (ox, y))
-					ox += g.get_width() + 9
-				y += 20
-				for sid in o.proc.syn:
-					if y + 12 > note_top: break
-					draw_text(s, '* ' + sid, rr.x + 16, y, 11, VIOLET, True)
-					y += 14
+			y += 16
 
 		if note_lines:
 			pygame.draw.rect(s, (o.note_col[0] // 6, o.note_col[1] // 6, o.note_col[2] // 6),
 			                 (rr.x + 10, note_top, rr.w - 20, note_h), 0, 6)
 			for j, line in enumerate(note_lines):
-				draw_text(s, line, rr.x + rr.w * 0.5, note_top + 6 + j * 15, 12, o.note_col, True, 'tc')
+				draw_text(s, line, rr.centerx, note_top + 4 + j * 15, 12, o.note_col, True, 'tc')
 
 
-# ============================================================ COMBINATION TREE
-def _tree_node(s, r, title, sub, col, emit, t, sel, prog=None, chips=(), gold=False, mods=None):
-	bg = (18, 22, 33) if not sel else (26, 31, 46)
-	pygame.draw.rect(s, bg, r, 0, 8)
-	pygame.draw.rect(s, col if sel else shade(col, 0.45), r, 2 if sel else 1, 8)
-	draw_text(s, trim(title, int(r.w / 7.6)), r.centerx, r.y + 7, 13, col if gold else INK, True, 'tc')
-	if sub:
-		draw_text(s, trim(sub, int(r.w / 5.6)), r.centerx, r.y + 24, 10, INK_FAINT, False, 'tc')
-	sh = r.h - 44 - (16 if chips else 0) - (8 if prog is not None else 0)
-	if sh > 30 and emit:
-		sw = min(r.w - 16, int(sh * 2.2))
-		_weapon_scene(s, (r.centerx - sw * 0.5, r.y + 40, sw, sh), emit, col, t, mods)
-	y = r.y + 44 + max(0, sh)
-	if chips:
-		ox = r.x + 8
-		for glyph, have, need, cc in chips:
-			lbl = '%s%d/%d' % (glyph, have, need)
-			g = text(lbl, 11, cc if have >= need else INK_FAINT, have >= need)
-			if ox + g.get_width() + 6 > r.right - 8: break
-			s.blit(g, (ox, y))
-			ox += g.get_width() + 8
-		y += 15
-	if prog is not None:
-		bar(s, r.x + 8, y, r.w - 16, 3, prog, GOLD if gold else col, (30, 34, 46), 2)
+def _rk_map(keys):
+	"""Scene ops want ranks; a plain set of op ids means 'one rank each'."""
+	if keys is None: return None
+	if isinstance(keys, dict): return keys
+	return {k: 1 for k in keys}
 
 
-def draw_tree(s, rect, w, o, t, mouse):
-	"""Where the selected card actually leads.
+# ====================================================== THE PREVIEW PANEL
+def _mini(s, rect, label, lcol=INK_FAINT):
+	pygame.draw.rect(s, (10, 13, 20), rect, 0, 6)
+	pygame.draw.rect(s, (30, 36, 52), rect, 1, 6)
+	draw_text(s, label, rect[0] + 8, rect[1] + 5, 10, lcol, True)
 
-	The emitter it touches, every evolution that emitter can reach, and how far the
-	current process is along each recipe -- each node running its own animation, so
-	the shape of the choice is visible instead of implied."""
+
+def _rows_table(s, x, y, w_, rows, maxrows=8):
+	for label, a, b, sign in rows[:maxrows]:
+		draw_text(s, label, x, y, 12, INK_FAINT)
+		g = text(str(b), 13, GREEN if sign > 0 else RED, True)
+		s.blit(g, (x + w_ - g.get_width(), y - 1))
+		g2 = text(str(a) + '  >', 12, INK_DIM)
+		s.blit(g2, (x + w_ - g.get_width() - 10 - g2.get_width(), y))
+		y += 18
+	return y
+
+
+def _radius_ab(s, rect, r0, r1, col, unit=''):
+	"""Two radii, drawn to scale against each other. For anything whose upgrade IS
+	a radius, a number is not an image and an image is not a number: show both."""
 	x, y, w_, h_ = rect
-	panel(s, rect, 205)
-	proc = o.proc
-	emit = None
-	if o.kind == 'new': emit = o.key.split(':', 1)[1] if ':' in o.key else o.key
-	elif proc is not None: emit = proc.emit
-	if emit is None and w.arsenal.procs:
-		proc = max(w.arsenal.procs, key=lambda p: p.power(w.player))
-		emit = proc.emit
-	if emit is None: return
+	cx = x + w_ * 0.5; cy = y + h_ * 0.52
+	k = (min(w_, h_) * 0.42) / max(1.0, r1)
+	pygame.draw.circle(s, (48, 58, 80), (int(cx), int(cy)), max(2, int(r0 * k)), 1)
+	pygame.draw.circle(s, col, (int(cx), int(cy)), max(2, int(r1 * k)), 2)
+	blit_glow(s, cx, cy, 14, col, 0.6)
+	draw_text(s, '%d%s' % (int(r0), unit), cx, cy + int(r0 * k) + 2, 10, INK_FAINT, False, 'tc')
+	draw_text(s, '%d%s' % (int(r1), unit), cx, y + h_ - 15, 11, col, True, 'tc')
 
-	em = E.get(emit, {})
-	draw_text(s, 'WHERE THIS LEADS', x + 14, y + 8, 11, INK_FAINT, True)
-	draw_text(s, em.get('name', ''), x + 150, y + 8, 11, shade(em.get('col', INK), 0.9), True)
 
-	evos = list(EVO_BY_EMIT.get(emit, ()))
-	have = proc.ops if proc is not None else {}
-	cols = 1 + len(evos)
-	gapx = 14
-	nw = int((w_ - 28 - (cols - 1) * gapx) / max(1, cols))
-	ny = y + 28
-	nh = h_ - 28 - 34
+def _passive_ab(s, rect, pid, pl, g, col, t):
+	"""Before/after for a system upgrade, in the terms of the thing it changes."""
+	if pid == 'magnet':
+		_radius_ab(s, rect, pl.magnet, g.magnet, col)
+	elif pid == 'area':
+		_radius_ab(s, rect, 96 * pl.area_mult, 96 * g.area_mult, col)
+	elif pid in ('hp', 'regen', 'armor'):
+		x, y, w_, h_ = rect
+		by = y + h_ * 0.42
+		full = w_ - 28
+		# the old bar drawn inside the new one, so the gain is the visible remainder
+		pygame.draw.rect(s, (26, 30, 42), (x + 14, by, full, 12), 0, 4)
+		pygame.draw.rect(s, shade(HP_COL, 0.45), (x + 14, by, int(full * (pl.maxhp / max(1.0, g.maxhp))), 12), 0, 4)
+		pygame.draw.rect(s, HP_COL, (x + 14, by, full, 12), 1, 4)
+		draw_text(s, '%d  >  %d max integrity' % (int(pl.maxhp), int(g.maxhp)), x + w_ * 0.5,
+		          by + 20, 12, HP_COL, True, 'tc')
+		if g.regen != pl.regen or g.armor != pl.armor:
+			draw_text(s, 'regen %.1f/s   armour %d' % (g.regen, int(g.armor)), x + w_ * 0.5,
+			          by + 38, 11, INK_FAINT, False, 'tc')
+	elif pid in ('speed', 'haste', 'vel'):
+		x, y, w_, h_ = rect
+		for k, (v0, cc) in enumerate(((1.0, (60, 72, 96)), (g.move_mult / max(0.01, pl.move_mult), col))):
+			yy = y + h_ * (0.4 + 0.22 * k)
+			f = ((t * 0.55 * v0) % 1.0)
+			pygame.draw.line(s, (26, 32, 46), (x + 16, yy), (x + w_ - 16, yy), 1)
+			_dot(s, x + 16 + (w_ - 32) * f, yy, 4, cc, 0.9)
+		draw_text(s, 'now  /  after', x + w_ * 0.5, y + h_ - 18, 11, INK_FAINT, False, 'tc')
+	else:
+		x, y, w_, h_ = rect
+		_passive_art(s, rect, pid, col, t, (t * 0.8) % 1.0)
+
+
+def draw_preview(s, rect, w, o, t):
+	"""What the selected card IS -- not an ornament of it.
+
+	Left: the weapon running now. Right of the arrow: the same weapon with this
+	card taken. Beside them, every number that moves. Under them, the full text,
+	unwrapped and unabridged, because a description you have to hunt for is a
+	description nobody reads."""
+	x, y, w_, h_ = rect
+	panel(s, rect, 216)
+	pl = w.player
+	pv = o.pv or {'mode': 'none', 'rows': []}
+	mode = pv.get('mode', 'none')
+	col = o.col
+
+	head = {'ab': 'WHAT CHANGES', 'solo': 'WHAT THIS WEAPON DOES',
+	        'passive': 'WHAT CHANGES', 'fuse': 'WHAT THE MERGE PRODUCES',
+	        'heal': 'WHAT THIS RESTORES'}.get(mode, 'PREVIEW')
+	draw_text(s, head, x + 14, y + 8, 11, INK_FAINT, True)
+	draw_text(s, o.title, x + 26 + text_w(head, 11, True), y + 7, 13, col, True)
+	draw_text(s, 'T  full evolution tree', x + w_ - 14, y + 8, 10, INK_FAINT, False, 'tr')
+
+	# ---- text band first: it owns the bottom and nothing overlaps it
+	lines = wrap(o.desc, 14, w_ - 32)
+	extra = None
+	if mode == 'ab' and pv.get('evo_b') and not pv.get('evo_a'):
+		extra = ('EVOLVES INTO ' + pv['evo_b']['name'], pv['evo_b']['desc'], GOLD)
+	elif mode == 'fuse' and pv.get('evo_b'):
+		extra = ('MERGE EVOLVES INTO ' + pv['evo_b']['name'], pv['evo_b']['desc'], GOLD)
+	elif mode == 'fuse' and pv.get('dropped'):
+		extra = ('DROPPED', ', '.join(O[k]['name'] for k in pv['dropped']), RED)
+	elif o.note:
+		extra = (o.note, '', o.note_col)
+	eh = 0
+	if extra:
+		eh = 20 + 16 * len(wrap(extra[1], 13, w_ - 40)) if extra[1] else 22
+	th = 8 + 17 * len(lines) + eh
+	ty = y + h_ - th - 8
+	pygame.draw.rect(s, (17, 21, 32), (x + 10, ty, w_ - 20, th + 2), 0, 6)
+	yy = ty + 5
+	for line in lines:
+		draw_text(s, line, x + 20, yy, 14, INK, False)
+		yy += 17
+	if extra:
+		pygame.draw.line(s, (34, 42, 60), (x + 20, yy + 1), (x + w_ - 20, yy + 1))
+		yy += 5
+		draw_text(s, extra[0], x + 20, yy, 13, extra[2], True)
+		yy += 17
+		for line in wrap(extra[1], 13, w_ - 40):
+			draw_text(s, line, x + 20, yy, 13, shade(extra[2], 0.8))
+			yy += 16
+
+	# ---- scenes and numbers
+	top = y + 26
+	bot = ty - 8
+	bh = max(70, bot - top)
+	tw = 250
+	sw = w_ - 28 - tw - 14
+	rows = pv.get('rows', [])
+	shape = pl.shape; pcol = pl.col
+
+	if mode == 'ab':
+		half = int((sw - 34) * 0.5)
+		ra = (x + 14, top, half, bh)
+		rb = (x + 14 + half + 34, top, half, bh)
+		_weapon_scene(s, ra, pv['emit'], shade(col, 0.75), t, _rk_map(pv['before']),
+		              o.proc.stats(pl) if o.proc else None, shape, pcol)
+		_weapon_scene(s, rb, pv['emit'], col, t, _rk_map(pv['after']),
+		              pv['ghost'].stats(pl), shape, pcol)
+		_arrow(s, ra[0] + half + 6, top + bh * 0.5, rb[0] - 6, top + bh * 0.5, GOLD, 3, 9)
+		draw_text(s, trim(pv.get('name_a', 'now'), int(half / 6.2)), ra[0] + 8, top + 4, 11, INK_FAINT, True)
+		draw_text(s, trim(pv.get('name_b', 'after'), int(half / 6.2)), rb[0] + 8, top + 4, 11,
+		          GOLD if pv.get('evo_b') else col, True)
+	elif mode == 'solo':
+		rb = (x + 14, top, sw, bh)
+		_weapon_scene(s, rb, pv['emit'], col, t, None, pv['ghost'].stats(pl), shape, pcol)
+		draw_text(s, pv.get('name_b', ''), rb[0] + 8, top + 4, 11, col, True)
+	elif mode == 'fuse':
+		third = int((sw - 46) / 3)
+		bh = max(60, bh - 18)          # room for the merged op list under the result
+		ra = (x + 14, top, third, bh)
+		rbb = (x + 14 + third + 18, top, third, bh)
+		rc = (x + 14 + 2 * (third + 18) + 10, top, third, bh)
+		a, b, gh = pv['a'], pv['b'], pv['ghost']
+		_weapon_scene(s, ra, a.emit, shade(a.col, 0.8), t, a.ops, a.stats(pl), shape, pcol)
+		_weapon_scene(s, rbb, b.emit, shade(b.col, 0.8), t, b.ops, b.stats(pl), shape, pcol)
+		_weapon_scene(s, rc, gh.emit, MAGENTA if not gh.evo else GOLD, t, gh.ops, gh.stats(pl), shape, pcol)
+		draw_text(s, '+', ra[0] + third + 9, top + bh * 0.5 - 10, 20, MAGENTA, True, 'tc')
+		_arrow(s, rbb[0] + third + 3, top + bh * 0.5, rc[0] - 4, top + bh * 0.5, MAGENTA, 3, 9)
+		# the merged op set, spelled out: this is the answer to "is this a downgrade"
+		oy = top + bh + 3
+		for r_, pp, cc in ((ra, a, a.col), (rbb, b, b.col), (rc, gh, GOLD if gh.evo else MAGENTA)):
+			fit(s, pp.name, r_[0] + 8, top + 4, 11, cc, True, third - 16, 'tl', 8)
+			ox = r_[0]
+			for k, v in sorted(pp.ops.items(), key=lambda kv: -kv[1]):
+				gtx = text('%s%s' % (O[k]['glyph'], rk(v)), 12, O[k]['col'] or INK_DIM, True)
+				if ox + gtx.get_width() > r_[0] + third: break
+				s.blit(gtx, (ox, oy)); ox += gtx.get_width() + 7
+	elif mode == 'passive' and pv.get('emit'):
+		half = int((sw - 34) * 0.5)
+		ra = (x + 14, top, half, bh)
+		rb = (x + 14 + half + 34, top, half, bh)
+		ops = pv['ops']
+		_weapon_scene(s, ra, pv['emit'], shade(col, 0.7), t, ops, pv['st_a'], shape, pcol)
+		_weapon_scene(s, rb, pv['emit'], col, t, ops, pv['st_b'], shape, pcol)
+		_arrow(s, ra[0] + half + 6, top + bh * 0.5, rb[0] - 6, top + bh * 0.5, GOLD, 3, 9)
+		fit(s, pv.get('name_a', ''), ra[0] + 8, top + 4, 11, INK_FAINT, True, half - 16, 'tl', 8)
+		draw_text(s, 'with ' + o.title, rb[0] + 8, top + 4, 11, col, True)
+	elif mode == 'passive':
+		rb = (x + 14, top, sw, bh)
+		_mini(s, rb, 'SYSTEM')
+		_passive_ab(s, rb, pv['pid'], pl, pv['ghost'], col, t)
+	else:
+		rb = (x + 14, top, sw, bh)
+		_mini(s, rb, 'REPAIR')
+		draw_art(s, (rb[0] + 4, rb[1] + 16, rb[2] - 8, rb[3] - 22), o.kind,
+		         o.key.split(':', 1)[-1], col, t)
+
+	tx = x + w_ - tw - 14
+	pygame.draw.line(s, (34, 42, 60), (tx - 8, top), (tx - 8, bot))
+	draw_text(s, 'NOW   >   AFTER', tx + tw, top, 10, INK_FAINT, True, 'tr')
+	if rows:
+		_rows_table(s, tx, top + 18, tw, rows, max(1, int((bh - 20) / 18)))
+	else:
+		draw_text(s, 'no stat changes', tx, top + 20, 12, INK_FAINT)
+
+
+# ============================================== THE COMBINATION TREE (browsable)
+def _tree_rows():
+	"""Left to right: every emitter, then the evolutions it can crystallise into."""
+	out = []
+	for k in EMIT_ORDER:
+		out.append((k, list(EVO_BY_EMIT.get(k, ()))))
+	return out
+
+
+def draw_tree_screen(s, t, scroll, mouse, w=None, overlay=False):
+	"""The whole system on one scrollable page: bases on the left, what each one
+	becomes on the right, with the exact recipe and the effect running."""
+	if overlay:
+		o = pygame.Surface((W, H), pygame.SRCALPHA)
+		o.fill((4, 6, 11, 240))
+		s.blit(o, (0, 0))
+	else:
+		s.fill((6, 8, 13))
+	draw_text(s, 'EVOLUTION TREE', 40, 22, 26, GOLD, True)
+	draw_text(s, 'every emitter and everything it can become - scroll, hover a row',
+	          40, 54, 12, INK_DIM)
+	draw_text(s, 'ESC / T close' if overlay else 'ESC back', W - 40, 26, 12, INK_FAINT, False, 'tr')
+
+	pl = w.player if w is not None else None
+	have = {}
+	if w is not None:
+		for p in w.arsenal.procs: have[p.emit] = p
+
+	PW = 300                          # the live preview column on the right
+	x0 = 40
+	cw = 236                          # emitter column
+	gut = 46                          # connector gutter: nothing is ever drawn over a node
+	ex = x0 + cw + gut                # evolution column
+	ew = W - PW - 40 - ex - 20
+	top = 84
+	bot = H - 30
+	y = top - scroll
 	hover = None
+	clip = s.get_clip()
+	s.set_clip(pygame.Rect(0, top, W - PW - 30, bot - top))
 
-	r0 = pygame.Rect(x + 14, ny, nw, nh)
-	sub = 'rank %d' % proc.rank if proc is not None else 'not running yet'
-	chips = [(O[k]['glyph'], v, v, O[k]['col'] or INK) for k, v in
-	         sorted(have.items(), key=lambda kv: -kv[1])[:5]]
-	_tree_node(s, r0, em.get('name', emit), sub, em.get('col', INK), emit, t,
-	           r0.collidepoint(mouse), None, chips)
-	if r0.collidepoint(mouse): hover = (em.get('name', emit), em.get('desc', ''))
+	for emit, evos in _tree_rows():
+		em = E[emit]
+		rh = max(len(evos) * 62, 96) + 14
+		if y + rh > top - 40 and y < bot:
+			r = pygame.Rect(x0, int(y), cw, rh - 12)
+			pr = have.get(emit)
+			on = pr is not None
+			pygame.draw.rect(s, (20, 25, 37) if on else (14, 17, 26), r, 0, 8)
+			pygame.draw.rect(s, em['col'] if on else shade(em['col'], 0.4), r, 2 if on else 1, 8)
+			glyph_box(s, r.x + 10, r.y + 10, 32, em['glyph'], em['col'], (10, 13, 20))
+			draw_text(s, em['name'], r.x + 50, r.y + 10, 15, em['col'], True)
+			draw_text(s, 'tier %d   %.0f dmg   x%d   %.2fs'
+			          % (em['tier'], em['dmg'], em['count'], em['cd']),
+			          r.x + 50, r.y + 30, 11, INK_FAINT)
+			ax_ = r.x + 12; ay_ = r.y + 54
+			draw_text(s, 'grows with', ax_, ay_, 10, INK_FAINT, True)
+			ay_ += 14
+			for k in em['affinity']:
+				gk = text('%s %s' % (O[k]['glyph'], O[k]['name']), 11, O[k]['col'] or INK_DIM, True)
+				if ax_ + gk.get_width() + 8 > r.right - 10:
+					ax_ = r.x + 12; ay_ += 15
+				if ay_ > r.bottom - 30: break
+				s.blit(gk, (ax_, ay_))
+				ax_ += gk.get_width() + 10
+			if on:
+				fit(s, 'RUNNING: ' + pr.name, r.x + 12, r.bottom - 18, 11, GREEN, True, cw - 24, 'tl', 8)
+			if r.collidepoint(mouse):
+				hover = ('emit', emit, None)
+			for j, ev in enumerate(evos):
+				ry = y + j * 62
+				er = pygame.Rect(ex, int(ry), ew, 50)
+				done = pr is not None and pr.evo is ev
+				got = sum(min(pr.ops.get(k, 0) if pr else 0, v) for k, v in ev['req'].items())
+				need = sum(ev['req'].values())
+				cc = GOLD if done else (shade(GOLD, 0.75) if got else INK_FAINT)
+				# elbow connector, drawn only inside the gutter
+				my = r.y + rh * 0.5 - 6
+				pygame.draw.line(s, shade(GOLD, 0.30), (r.right + 4, my), (ex - gut * 0.5, my), 1)
+				pygame.draw.line(s, shade(GOLD, 0.30), (ex - gut * 0.5, my), (ex - gut * 0.5, ry + 25), 1)
+				pygame.draw.line(s, shade(GOLD, 0.30), (ex - gut * 0.5, ry + 25), (ex - 4, ry + 25), 1)
+				pygame.draw.rect(s, (24, 21, 12) if done else (14, 17, 26), er, 0, 7)
+				pygame.draw.rect(s, cc if (done or er.collidepoint(mouse)) else (36, 42, 58),
+				                 er, 2 if done else 1, 7)
+				half = int(ew * 0.44)
+				draw_text(s, ev['name'], er.x + 12, er.y + 6, 14, cc, True)
+				recipe = '   +   '.join('%s %s' % (O[k]['name'], rk(v)) for k, v in ev['req'].items())
+				draw_text(s, recipe, er.x + 12, er.y + 26, 11, INK_DIM)
+				dy = er.y + 7
+				for line in wrap(ev['desc'], 11, ew - half - 76)[:2]:
+					draw_text(s, line, er.x + half, dy, 11, INK_FAINT)
+					dy += 14
+				pw = min(120, ew * 0.22)
+				bar(s, er.right - pw - 12, er.y + 32, pw, 4, got / max(1, need),
+				    GOLD if done else shade(GOLD, 0.7), (30, 34, 46), 2)
+				draw_text(s, 'EVOLVED' if done else '%d/%d' % (got, need),
+				          er.right - 12, er.y + 9, 11, cc, True, 'tr')
+				if er.collidepoint(mouse):
+					hover = ('evo', emit, ev)
+		y += rh
+	s.set_clip(clip)
 
-	for i, ev in enumerate(evos):
-		rx = x + 14 + (i + 1) * (nw + gapx)
-		r = pygame.Rect(rx, ny, nw, nh)
-		req = ev['req']
-		got = sum(min(have.get(k, 0), v) for k, v in req.items())
-		need = sum(req.values())
-		done = proc is not None and proc.evo is ev
-		chips = [(O[k]['glyph'], have.get(k, 0), v, O[k]['col'] or INK) for k, v in req.items()]
-		pygame.draw.line(s, shade(GOLD, 0.35), (r0.right, ny + nh * 0.5), (rx, ny + nh * 0.5), 1)
-		_tree_node(s, r, ev['name'], 'EVOLVED' if done else 'evolution', GOLD, emit, t,
-		           r.collidepoint(mouse), got / max(1, need), chips, True, req)
-		if r.collidepoint(mouse): hover = (ev['name'], ev['desc'])
-
-	if hover is None and evos:
-		best = max(evos, key=lambda ev: sum(min(have.get(k, 0), v) for k, v in ev['req'].items()))
-		hover = (best['name'], best['desc'])
-	if hover:
-		draw_text(s, hover[0], x + 14, y + h_ - 24, 12, GOLD, True)
-		draw_text(s, trim(hover[1], int((w_ - 60) / 6.4)), x + 20 + text_w(hover[0], 12, True),
-		          y + h_ - 24, 12, INK_DIM)
-	draw_text(s, 'hover a node', x + w_ - 14, y + 8, 10, INK_FAINT, False, 'tr')
-
-
+	# ---- the live panel: whatever the mouse is on, running
+	px = W - PW - 20
+	panel(s, (px, top, PW, bot - top), 220)
+	if hover is None: hover = ('emit', EMIT_ORDER[0], None)
+	kind, emit, ev = hover
+	em = E[emit]
+	title = ev['name'] if ev else em['name']
+	col = GOLD if ev else em['col']
+	draw_text(s, title, px + 14, top + 10, 16, col, True)
+	sc = (px + 14, top + 36, PW - 28, 150)
+	ops = dict(ev['req']) if ev else {}
+	if ev: ops.update(ev.get('grant', {}))
+	st = None
+	if ev:
+		g = ghost_process(emit, ops, 3)
+		st = g.stats(pl) if pl is not None else None
+	_weapon_scene(s, sc, emit, col, t, ops or None, st,
+	              pl.shape if pl else 'dart', pl.col if pl else CYAN)
+	yy = top + 196
+	for line in wrap(ev['desc'] if ev else em['desc'], 13, PW - 28):
+		draw_text(s, line, px + 14, yy, 13, INK_DIM)
+		yy += 17
+	yy += 6
+	if ev:
+		draw_text(s, 'RECIPE', px + 14, yy, 11, INK_FAINT, True); yy += 17
+		for k, v in ev['req'].items():
+			draw_text(s, '%s  %s %s' % (O[k]['glyph'], O[k]['name'], rk(v)), px + 14, yy, 12,
+			          O[k]['col'] or INK, True)
+			yy += 16
+		for k, v in ev.get('grant', {}).items():
+			draw_text(s, 'grants %s +%d' % (O[k]['name'], v), px + 14, yy, 11, GREEN)
+			yy += 15
+	else:
+		draw_text(s, 'AFFINITY', px + 14, yy, 11, INK_FAINT, True); yy += 17
+		for k in em['affinity']:
+			draw_text(s, '%s  %s' % (O[k]['glyph'], O[k]['name']), px + 14, yy, 12,
+			          O[k]['col'] or INK, True)
+			yy += 16
+	mn = wrap('Any two processes can also MERGE into one: union of every op, ranks added, '
+	          'a slot freed. A merge never loses an op.', 11, PW - 28)
+	my_ = bot - 12 - 14 * len(mn)
+	for line in mn:
+		draw_text(s, line, px + 14, my_, 11, MAGENTA)
+		my_ += 14
+	return max(0, y + scroll - bot + 40)
 # ================================================================= PAUSE
 def draw_pause(w, s, tab=0):
 	o = pygame.Surface((W, H), pygame.SRCALPHA)
@@ -1144,7 +1501,7 @@ def draw_pause(w, s, tab=0):
 	s.blit(o, (0, 0))
 	pl = w.player
 	draw_text(s, 'SUSPENDED', CX, 26, 30, INK, True, 'tc')
-	draw_text(s, 'ESC resume   -   Q quit to menu', CX, 62, 13, INK_DIM, False, 'tc')
+	draw_text(s, 'ESC resume   -   T evolution tree   -   Q quit to menu', CX, 62, 13, INK_DIM, False, 'tc')
 
 	# ---- left: processes
 	LW = int(W * 0.50)
@@ -1232,10 +1589,16 @@ def draw_pause(w, s, tab=0):
 
 
 # ================================================================== CODEX
-def draw_codex(s, page, scroll):
+CODEX_PAGES = 5
+
+
+def draw_codex(s, page, scroll, t=0.0, mouse=(0, 0)):
+	if page == 4:
+		# the tree is its own full-page layout, scroll and all
+		return draw_tree_screen(s, t, scroll, mouse, None) + H - 120
 	s.fill((6, 8, 13))
 	draw_text(s, 'CODEX', 40, 26, 30, INK, True)
-	tabs = ['EMITTERS', 'OPS', 'SYNERGIES', 'EVOLUTIONS']
+	tabs = ['EMITTERS', 'OPS', 'SYNERGIES', 'EVOLUTIONS', 'TREE']
 	x = 40
 	for i, t in enumerate(tabs):
 		col = CYAN if i == page else INK_FAINT
@@ -1377,29 +1740,40 @@ def draw_pace_strip(s, y, sel, t):
 def draw_select(s, t, sel, boots, pace_sel=0):
 	from game.weapons import BOOTS, E, O, PASSIVE_BY_ID
 	from core.pace import PACES
-	s.fill((5, 7, 12))
+	p = PACES[pace_sel]
+	# the schedule you picked owns the room: the backdrop is its colour, so the
+	# choice is felt before it is read
+	pc = p['col']
+	s.fill((int(6 + pc[0] * 0.085), int(8 + pc[1] * 0.085), int(13 + pc[2] * 0.085)))
+	g = pygame.Surface((W, H), pygame.SRCALPHA)
+	for i in range(11):
+		a = t * 0.18 + i * TAU / 11
+		r = 250 + 90 * math.sin(t * 0.4 + i)
+		pygame.draw.circle(g, (pc[0] // 5, pc[1] // 5, pc[2] // 5, 120),
+		                   (int(CX + math.cos(a) * r), int(CY + math.sin(a) * r * 0.5)), 110, 2)
+	s.blit(g, (0, 0))
+	blit_glow(s, CX, 116, 900, pc, 0.18)
 	rng = random.Random(2)
 	for i in range(70):
 		x = rng.randrange(W); y = rng.randrange(H)
 		f = 0.15 + 0.85 * abs(math.sin(t * 0.9 + i * 0.7))
-		pygame.draw.rect(s, shade((50, 110, 190), f * 0.35), (x, y, 2, 2))
+		pygame.draw.rect(s, shade(pc, f * 0.5), (x, y, 2, 2))
 
 	draw_text(s, 'BOOT CONFIGURATION', CX, 26, 28, INK, True, 'tc')
 	draw_text(s, 'TRAINING SCHEDULE   -   1-4 or click', CX, 62, 12, INK_FAINT, False, 'tc')
 	pace_rects = draw_pace_strip(s, 80, pace_sel, t)
-	p = PACES[pace_sel]
 	draw_text(s, p['desc'], CX, 158, 12, INK_DIM, False, 'tc')
 	from game.director import BIOME_TIME
 	draw_text(s, 'xp x%.1f    caches x%.1f    biome %ds    pressure x%.1f    move +%d%%    cooldown %d%%'
 	          % (p['xp'], p['chest'], int(BIOME_TIME / p['biome']), p['rate'],
 	             round((p['move'] - 1.0) * 100), round(p['cd'] * 100)),
-	          CX, 174, 11, shade(p['col'], 0.85), False, 'tc')
+	          CX, 174, 11, shade(pc, 0.9), False, 'tc')
 
 	n = len(boots)
-	cols = 3
-	cw, chh = 340, 196
-	gapx, gapy = 26, 22
-	rows = (n + cols - 1) // cols
+	cols = 4 if n > 6 else 3
+	cw = int(min(316, (W - 60 - (cols - 1) * 22) / cols))
+	chh = int(clamp((H - 252) / ((n + cols - 1) // cols) - 18, 172, 262))
+	gapx, gapy = 22, 18
 	x0 = CX - (cols * cw + (cols - 1) * gapx) * 0.5
 	y0 = 194
 	rects = []
@@ -1411,31 +1785,41 @@ def draw_select(s, t, sel, boots, pace_sel=0):
 		em = E[b['emit']]
 		op = O[b['op']]
 		selq = i == sel
-		col = em['col']
+		col = b.get('col', em['col'])
 		surf = pygame.Surface((cw, chh), pygame.SRCALPHA)
 		pygame.draw.rect(surf, (13, 16, 24, 240), (0, 0, cw, chh), 0, 10)
-		pygame.draw.rect(surf, (col[0] // 5, col[1] // 5, col[2] // 5, 230), (0, 0, cw, 74), 0, 10)
+		pygame.draw.rect(surf, (col[0] // 5, col[1] // 5, col[2] // 5, 230), (0, 0, cw, 66), 0, 10)
 		pygame.draw.rect(surf, col if selq else LINE, (0, 0, cw, chh), 2 if selq else 1, 10)
 		s.blit(surf, r.topleft)
 		if selq: blit_glow(s, r.centerx, r.centery, 250, shade(col, 0.45), 0.3)
 
-		glyph_box(s, r.x + 14, r.y + 14, 46, em['glyph'], col, (10, 13, 20))
-		draw_text(s, b['name'], r.x + 72, r.y + 18, 20, INK, True)
-		draw_text(s, em['name'], r.x + 72, r.y + 44, 12, shade(col, 1.0))
-		y = r.y + 86
-		for line in wrap(b['desc'], 13, cw - 30)[:3]:
-			draw_text(s, line, r.x + 15, y, 13, INK_DIM)
-			y += 17
-		y = r.y + chh - 42
-		pygame.draw.line(s, (30, 36, 52), (r.x + 15, y - 6), (r.x + cw - 15, y - 6))
-		cc = op['col'] or col
-		draw_text(s, '%s %s I' % (op['glyph'], op['name']), r.x + 15, y, 12, cc, True)
-		draw_text(s, 'grows well with: ' + ', '.join(em['affinity'][:2]), r.x + cw - 15, y + 1, 10,
-		          INK_FAINT, False, 'tr')
-		p = PASSIVE_BY_ID[b['passive']]
-		draw_text(s, '+ ' + p['name'], r.x + 15, y + 17, 11, INK_FAINT)
+		# the unit itself, turning: no two boots are the same body any more
+		ux = r.x + 38; uy = r.y + 33
+		blit_glow(s, ux, uy, 40, col, 0.45)
+		agent_shape(s, ux, uy, t * 0.9 + i, b.get('shape', 'dart'), col, 15.0, t)
+		draw_text(s, b['name'], r.x + 70, r.y + 10, 19, INK, True)
+		draw_text(s, em['name'], r.x + 70, r.y + 34, 12, shade(em['col'], 1.0))
+		mb = b.get('mobility', 'dash')
+		draw_text(s, 'BLINK' if mb == 'blink' else 'DASH', r.right - 12, r.y + 10, 11,
+		          VIOLET if mb == 'blink' else INK_FAINT, True, 'tr')
 
-	draw_text(s, 'ARROWS choose    1-4 schedule    ENTER boot    ESC back', CX, H - 40, 13, CYAN, True, 'tc')
+		foot = r.y + chh - 24
+		sh = int(clamp(chh - 66 - 80, 48, 108))
+		_weapon_scene(s, (r.x + 12, r.y + 74, cw - 24, sh), b['emit'], em['col'], t,
+		              {b['op']: 1}, None, b.get('shape', 'dart'), col)
+		y = r.y + 74 + sh + 6
+		room = max(0, int((foot - 8 - y) / 15))
+		for line in wrap(b['desc'], 12, cw - 26)[:room]:
+			draw_text(s, line, r.x + 13, y, 12, INK_DIM)
+			y += 15
+		y = foot
+		pygame.draw.line(s, (30, 36, 52), (r.x + 13, y - 5), (r.x + cw - 13, y - 5))
+		cc = op['col'] or col
+		draw_text(s, '%s %s I' % (op['glyph'], op['name']), r.x + 13, y, 11, cc, True)
+		pp = PASSIVE_BY_ID[b['passive']]
+		draw_text(s, '+ ' + pp['name'], r.right - 13, y, 11, INK_FAINT, False, 'tr')
+
+	draw_text(s, 'ARROWS choose    1-4 schedule    ENTER boot    ESC back', CX, H - 30, 13, CYAN, True, 'tc')
 	return rects, pace_rects
 
 
@@ -1484,39 +1868,65 @@ def draw_title(s, t, sel, items, hiscore):
 	          CX, H - 26, 12, INK_FAINT, False, 'tc')
 
 
-def draw_end(w, s, t, win):
+def draw_end(w, s, t, win, scores=None):
+	"""A run only ends by dying. `win` here means it converged on the way down."""
 	o = pygame.Surface((W, H), pygame.SRCALPHA)
 	o.fill((4, 6, 10, 240))
 	s.blit(o, (0, 0))
-	col = GOLD if win else RED
-    # noqa
-	title = 'CONVERGED' if win else 'MODEL COLLAPSE'
-	sub = 'you survived the training run' if win else 'the gradients consumed you'
+	col = RED
+	title = 'MODEL COLLAPSE'
+	sub = 'converged, then kept going until it did not' if win else 'the gradients consumed you'
 	sc = ease_pop(min(1.0, t * 1.6))
-	g = text(title, int(52 * min(1.6, sc)), col, True)
-	s.blit(g, (CX - g.get_width() * 0.5, 70))
-	draw_text(s, sub, CX, 136, 15, INK_DIM, False, 'tc')
+	g = text(title, int(48 * min(1.6, sc)), col, True)
+	s.blit(g, (CX - g.get_width() * 0.5, 54))
+	draw_text(s, sub, CX, 112, 15, INK_DIM, False, 'tc')
+	if win:
+		draw_text(s, 'CONVERGED', CX, 134, 14, GOLD, True, 'tc')
 
 	d = w.director
-	x = CX - 300
-	y = 190
-	panel(s, (x - 20, y - 16, 640, 250), 200)
-	rows = [('schedule', w.pace['name']), ('survived', d.time_str()), ('level', str(w.player.level)),
+	x = 60
+	y = 176
+	RW = int(W * 0.44)
+	panel(s, (x - 20, y - 16, RW, 300), 200)
+	rows = [('schedule', w.pace['name']), ('unit', (w.boot or {}).get('name', '-')),
+	        ('survived', d.time_str()), ('level', str(w.player.level)),
+	        ('laps past the end', str(d.endless)),
 	        ('kills', str(w.stats['kills'])), ('damage dealt', '%d' % w.stats['dmg']),
 	        ('damage taken', '%d' % w.stats['taken']),
 	        ('evolutions', str(w.stats['evos'])), ('fusions', str(w.stats['fuses'])),
 	        ('final biome', w.level['name'])]
 	for k, v in rows:
 		draw_text(s, k, x, y, 14, INK_FAINT)
-		draw_text(s, v, x + 600, y, 14, INK, True, 'tr')
-		y += 27
+		draw_text(s, v, x + RW - 56, y, 14, INK, True, 'tr')
+		y += 25
 
-	y = 470
+	# ---- the board for this schedule only: runs are not comparable across them
+	bx = 60 + RW + 20
+	bw = W - bx - 60
+	panel(s, (bx, 160, bw, 300), 200)
+	draw_text(s, 'BEST RUNS  -  ' + w.pace['name'], bx + 18, 172, 15, shade(w.pace['col'], 0.95), True)
+	yy = 202
+	board = (scores or {}).get(w.pace['id'], [])
+	if not board:
+		draw_text(s, 'no runs recorded on this schedule yet', bx + 18, yy, 13, INK_FAINT)
+	for i, e in enumerate(board[:8]):
+		me = e.get('now')
+		c = GOLD if me else INK_DIM
+		draw_text(s, '%d.' % (i + 1), bx + 18, yy, 13, INK_FAINT, True)
+		draw_text(s, e.get('time', '0:00'), bx + 48, yy, 13, c, bool(me))
+		draw_text(s, 'lv %d' % e.get('level', 1), bx + 122, yy, 13, c)
+		draw_text(s, '%d kills' % e.get('kills', 0), bx + 190, yy, 13, c)
+		draw_text(s, e.get('unit', ''), bx + 300, yy, 12, INK_FAINT)
+		if e.get('converged'):
+			draw_text(s, 'CONVERGED', bx + bw - 18, yy, 11, GOLD, True, 'tr')
+		yy += 22
+
+	y = 486
 	draw_text(s, 'FINAL BUILD', CX, y, 14, INK, True, 'tc')
-	y += 26
+	y += 24
 	for pr in w.arsenal.procs:
 		ops = '  '.join('%s%s' % (O[k]['glyph'], rk(v)) for k, v in sorted(pr.ops.items(), key=lambda kv: -kv[1]))
 		line = '%s  %s   %s' % (E[pr.emit]['glyph'], pr.name, ops)
 		draw_text(s, line, CX, y, 13, GOLD if pr.evo else INK_DIM, bool(pr.evo), 'tc')
 		y += 19
-	draw_text(s, 'ENTER  restart      ESC  menu', CX, H - 44, 14, CYAN, True, 'tc')
+	draw_text(s, 'ENTER  run again      ESC  menu', CX, H - 40, 14, CYAN, True, 'tc')

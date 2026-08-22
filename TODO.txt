@@ -1,0 +1,81 @@
+DONE  (batch of 2026-08-22)
+
+ [x] ajouter un bouton pour reroll
+     -> REROLL / BANISH / SKIP / TREE sont maintenant quatre vrais boutons cliquables
+        en bas de l'ecran de level-up. Les raccourcis clavier restent.
+ [x] changer la couleur de fond selon le mode de depart selectionne
+     -> l'ecran de boot prend la couleur du schedule: fond, halo, orbes, poussiere.
+ [x] viral load / swarm consensus / token swarm indiscernables
+     -> les scenes d'armes tournent maintenant sur les VRAIES stats (count, cadence,
+        taille) et les VRAIES ops du process. Homing courbe, bounce zigzague, spin
+        s'enroule, split eclate, recursion relance, drain rapatrie. Deux evolutions
+        d'un meme emetteur ne peuvent plus se ressembler.
+ [x] hover multishot III laissait l'animation sur l'evolution
+     -> le panneau du bas suit la carte survolee/selectionnee, toujours.
+ [x] le preview central traverse par une ligne
+     -> les connecteurs de l'arbre sont confines a la gouttiere entre colonnes.
+ [x] wide attention +2 -> montrer l'evolution du rayon
+     -> rayon avant/apres a l'echelle pour magnet et area, barre d'integrite pour
+        hp/regen/armor, coureurs pour les vitesses, et pour les passifs globaux
+        (damage, cooldown, area, proj speed, crit, amount) l'arme reellement
+        equipee jouee AVANT / APRES.
+ [x] hover SPIN I: on ne comprend pas
+     -> chaque carte a un avant/apres joue cote a cote + table des stats qui bougent.
+ [x] la description au survol etait invisible
+     -> bandeau de texte pleine largeur en bas du panneau, 14px, non tronque.
+ [x] slot de process libre et aucune arme proposee
+     -> une arme est forcee sur la table des qu'un slot est libre.
+ [x] chain logit trop lent
+     -> cd 1.45s -> 0.40s, degats 13 -> 4.4 (dps +12%, sensation completement autre).
+ [x] IL FAUDRAIT UN LANCE-FLAMME
+     -> FLASH ATTENTION: cone soutenu, cd 0.13s, 4 langues perforantes.
+        Evolutions THERMAL RUNAWAY (burn3+giant3) et ATTENTION SINK (void3+pierce3).
+ [x] un perso avec une TP courte plutot qu'un dash
+     -> unite QUANTUM: blink 210px, cooldown 1.15s, porte le lance-flamme.
+ [x] les upgrades de degats individuelles font filler
+     -> la carte AMPLIFY (+20% degats sur un process) est supprimee. Les ops
+        purement statistiques sont pondrees x0.66. GIANT bascule sur la taille
+        (sa propriete unique) plutot que sur les degats.
+ [x] delai anti-misclick 0.4 -> 0.6s
+ [x] fusion: les upgrades sont-elles combinees / est-ce un downgrade
+     -> fuse_plan() garantit qu'aucune op ne se perd: le plafond d'ops monte avec
+        la fusion. Le panneau montre A + B -> resultat, avec les trois listes d'ops
+        et le dps estime des trois.
+ [x] bouton START pour la sandbox + bouton reset
+ [x] reconfigurer la sandbox une fois lancee
+     -> bandeau SCHEDULE + UNIT en haut du bench, changement a chaud.
+ [x] clic gauche +1 / clic droit -1 sur les bonus
+     -> vrai pour les ops ET les passifs (re-application propre pour les
+        multiplicatifs).
+ [x] descriptions completes sur les boutons du bench
+     -> chaque bouton porte sa description sous son label + tooltip.
+ [x] impossible de supprimer une arme ajoutee par erreur
+     -> croix rouge par process + DROP PROC.
+ [x] process slots inutilisables
+     -> le bench respecte arsenal.slots et expose SLOTS - / +.
+ [x] le jeu ne devrait pas se terminer
+     -> battre le dernier boss est un jalon (CONVERGED), pas une fin. Le director
+        repart en endless (+55% hp, +30% degats, +40% densite par tour). Seule la
+        mort termine un run. Tableau des scores par schedule sur l'ecran de fin.
+ [x] les unites de depart devraient avoir un look different + preview
+     -> 7 formes vectorielles distinctes (dart, trilobe, annulus, hex, cross,
+        blade, prism), couleur propre, animees sur la carte de selection.
+ [x] texte des merges tronque + preview ne montre pas le resultat
+     -> plus aucune troncature: les titres passent sur 2 lignes, les sous-titres
+        jusqu'a 4, et fit() reduit la taille plutot que de couper.
+ [x] recursion blade + leeching bolt = quoi
+     -> visible: trois scenes, trois listes d'ops, dps 95 -> 244.
+ [x] + integrity devrait donner un full heal
+     -> SKIP et la carte DEFRAGMENT rendent toute l'integrite manquante.
+ [x] un ARBRE consultable des evolutions
+     -> ecran EVOLUTION TREE: bases a gauche, evolutions a droite, recettes,
+        progression, description, panneau live. Accessible par T pendant le
+        level-up, T depuis la pause, et page 5 du codex.
+ [x] +1 seconde apres l'animation de level up
+
+
+A GARDER EN TETE
+
+ - le lance-flamme et le blink n'ont pas encore ete equilibres en conditions
+   reelles au-dela de la simulation headless.
+ - l'ecran de fin ne garde que les 10 meilleurs runs par schedule.

@@ -42,6 +42,14 @@ from core.audio import Audio
 from core.pace import PACES, DEFAULT_PACE
 
 
+LVL_DELAY = 1.0     # let the level-up burst finish before the cards take the screen
+
+
+def ui_pages():
+	from game.ui import CODEX_PAGES
+	return CODEX_PAGES
+
+
 def _pace_index(pid):
 	for i, p in enumerate(PACES):
 		if p['id'] == pid: return i
@@ -79,9 +87,16 @@ SAVE = _save_path()
 
 def load_save():
 	try:
-		with open(SAVE, 'r') as f: return json.load(f)
+		with open(SAVE, 'r') as f:
+			d = json.load(f)
 	except Exception:
-		return {'best': None, 'runs': 0, 'seen_evos': [], 'mute': False}
+		d = {}
+	d.setdefault('best', None)
+	d.setdefault('runs', 0)
+	d.setdefault('seen_evos', [])
+	d.setdefault('mute', False)
+	d.setdefault('scores', {})       # one board per training schedule
+	return d
 
 
 def save_data(d):
@@ -148,6 +163,9 @@ class Game:
 		self.codex_max = 0
 		self.world = None
 		self.levelup = None
+		self.lvl_wait = 0.0
+		self.tree_scroll = 0
+		self.tree_max = 0
 		self.end_t = 0.0
 		self.fps_acc = 0.0
 		self.fps_n = 0
@@ -342,9 +360,9 @@ class Game:
 				if ev.type == pygame.KEYDOWN:
 					if ev.key == pygame.K_ESCAPE: self.scene = 'title'
 					elif ev.key in (pygame.K_RIGHT, pygame.K_d):
-						self.codex_page = (self.codex_page + 1) % 4; self.codex_scroll = 0
+						self.codex_page = (self.codex_page + 1) % ui_pages(); self.codex_scroll = 0
 					elif ev.key in (pygame.K_LEFT, pygame.K_a):
-						self.codex_page = (self.codex_page - 1) % 4; self.codex_scroll = 0
+						self.codex_page = (self.codex_page - 1) % ui_pages(); self.codex_scroll = 0
 					elif ev.key in (pygame.K_DOWN, pygame.K_s):
 						self.codex_scroll = min(max(0, self.codex_max - H + 120), self.codex_scroll + 60)
 					elif ev.key in (pygame.K_UP, pygame.K_w):
@@ -381,8 +399,22 @@ class Game:
 				self.mouse_held = False
 				if ev.type == pygame.KEYDOWN:
 					if ev.key in (pygame.K_ESCAPE, pygame.K_p): self.scene = 'play'
+					elif ev.key == pygame.K_t:
+						self.scene = 'tree'; self.tree_scroll = 0
 					elif ev.key == pygame.K_q:
 						self.scene = 'title'; self.world = None; self.sandbox = None
+
+			elif self.scene == 'tree':
+				self.mouse_held = False
+				if ev.type == pygame.KEYDOWN:
+					if ev.key in (pygame.K_ESCAPE, pygame.K_t, pygame.K_TAB): self.scene = 'pause'
+					elif ev.key in (pygame.K_DOWN, pygame.K_s): self.tree_scroll += 70
+					elif ev.key in (pygame.K_UP, pygame.K_w): self.tree_scroll -= 70
+				elif ev.type == pygame.MOUSEWHEEL:
+					self.tree_scroll -= ev.y * 60
+				elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 3:
+					self.scene = 'pause'
+				self.tree_scroll = max(0, min(self.tree_scroll, self.tree_max))
 
 			elif self.scene == 'levelup':
 				self.levelup.event(ev, self.world)
@@ -420,20 +452,22 @@ class Game:
 					self.slow_frames = max(0, self.slow_frames - 1)
 			if w.player.dead:
 				self.end_run(False)
-			elif w.win:
-				self.end_run(True)
 			elif w.player.banked > 0 and w.fx.hitstop <= 0 and not w.folding():
 				# a biome fold owns the screen for 1.5s: let it finish before the
-				# upgrade screen takes over
-				self.open_levelup()
+				# upgrade screen takes over, and give the level-up burst itself a
+				# second to play out instead of being cut off by its own reward
+				self.lvl_wait -= dt
+				if self.lvl_wait <= 0.0:
+					self.open_levelup()
+			else:
+				self.lvl_wait = LVL_DELAY
 		elif self.scene == 'levelup':
 			self.levelup.update(dt)
 			if self.levelup.done:
 				self.world.player.banked -= 1
 				self.levelup = None
 				self.scene = 'play'
-				if self.world.player.banked > 0:
-					self.open_levelup()
+				self.lvl_wait = LVL_DELAY
 		elif self.scene == 'sandbox':
 			self.sandbox.update(dt)
 			self.world.fx.update(dt)
@@ -452,24 +486,32 @@ class Game:
 		self.levelup = LevelUp(w, offers)
 		self.levelup.snapshot(self.screen)
 		self.scene = 'levelup'
+		self.lvl_wait = LVL_DELAY
 		self.audio.play('levelup', 0.8)
 
 	def end_run(self, win):
+		"""Only death gets here now: beating the last boss just raises the ramp."""
 		w = self.world
 		self.scene = 'end'
 		self.end_t = 0.0
-		if not win:
-			self.audio.play('gameover', 1.0)
-			w.fx.screen_flash(RED, 0.8)
-		else:
-			self.audio.play('evolve', 1.0)
+		self.audio.play('gameover', 1.0)
+		w.fx.screen_flash(RED, 0.8)
 		if w.sandbox: return          # a lab run is not a score
 		self.save['runs'] = self.save.get('runs', 0) + 1
+		entry = {'t': w.director.t, 'time': w.director.time_str(),
+		         'level': w.player.level, 'kills': w.stats['kills'],
+		         'converged': bool(w.win), 'unit': (w.boot or {}).get('name', ''),
+		         'pace': w.pace['name']}
+		board = self.save.setdefault('scores', {}).setdefault(w.pace['id'], [])
+		mark = dict(entry); mark['now'] = True
+		board.append(mark)
+		board.sort(key=lambda e: -e.get('t', 0))
+		del board[10:]
+		for e in board:
+			if e is not mark: e.pop('now', None)
 		best = self.save.get('best') or {}
 		if w.director.t > best.get('t', -1):
-			self.save['best'] = {'t': w.director.t, 'time': w.director.time_str(),
-			                     'level': w.player.level, 'kills': w.stats['kills'],
-			                     'win': win, 'pace': w.pace['name']}
+			self.save['best'] = dict(entry)
 		save_data(self.save)
 
 	# --------------------------------------------------------------- draw
@@ -481,7 +523,12 @@ class Game:
 		if self.scene == 'title':
 			ui.draw_title(s, self.t, self.sel, self.menu, self.save.get('best'))
 		elif self.scene == 'codex':
-			self.codex_max = ui.draw_codex(s, self.codex_page, self.codex_scroll)
+			self.codex_max = ui.draw_codex(s, self.codex_page, self.codex_scroll,
+			                               self.t, pygame.mouse.get_pos())
+		elif self.scene == 'tree':
+			if self.world: self.world.draw(s)
+			self.tree_max = ui.draw_tree_screen(s, self.t, self.tree_scroll,
+			                                    pygame.mouse.get_pos(), self.world, True)
 		elif self.scene == 'select':
 			from game.weapons import BOOTS
 			self.boot_rects, self.pace_rects = ui.draw_select(s, self.t, self.boot_sel, BOOTS, self.pace_sel)
@@ -494,7 +541,8 @@ class Game:
 				               self.mouse_held, self.mouse_mode, self.mouse_anchor, self.mouse_fade)
 			if self.scene == 'pause': ui.draw_pause(self.world, s)
 			elif self.scene == 'sandbox': self.sandbox.draw(s, self.world)
-			elif self.scene == 'end': ui.draw_end(self.world, s, self.end_t, self.world.win)
+			elif self.scene == 'end':
+				ui.draw_end(self.world, s, self.end_t, self.world.win, self.save.get('scores'))
 		elif self.scene == 'levelup':
 			self.levelup.draw(s, self.world)
 		if self.scene in ('play',) and self.opts['overlay']:
