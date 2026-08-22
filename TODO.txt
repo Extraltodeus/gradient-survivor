@@ -28,8 +28,10 @@ DONE  (batch of 2026-08-22)
  [x] chain logit trop lent
      -> cd 1.45s -> 0.40s, degats 13 -> 4.4 (dps +12%, sensation completement autre).
  [x] IL FAUDRAIT UN LANCE-FLAMME
-     -> FLASH ATTENTION: cone soutenu, cd 0.13s, 4 langues perforantes.
-        Evolutions THERMAL RUNAWAY (burn3+giant3) et ATTENTION SINK (void3+pierce3).
+     -> FLASH ATTENTION: cone soutenu, cd 0.13s, 4 langues perforantes, portee
+        ~176px. Evolutions THERMAL RUNAWAY (burn3+giant3) et ATTENTION SINK
+        (void3+pierce3). Cale par mesure sur foule de 24: 188 dps, exactement dans
+        la bande des autres AoE (nova 186, orbit 141, aura 141).
  [x] un perso avec une TP courte plutot qu'un dash
      -> unite QUANTUM: blink 210px, cooldown 1.15s, porte le lance-flamme.
  [x] les upgrades de degats individuelles font filler
@@ -38,9 +40,11 @@ DONE  (batch of 2026-08-22)
         (sa propriete unique) plutot que sur les degats.
  [x] delai anti-misclick 0.4 -> 0.6s
  [x] fusion: les upgrades sont-elles combinees / est-ce un downgrade
-     -> fuse_plan() garantit qu'aucune op ne se perd: le plafond d'ops monte avec
-        la fusion. Le panneau montre A + B -> resultat, avec les trois listes d'ops
-        et le dps estime des trois.
+     -> fuse_plan() ne jette plus rien du tout. Chaque op survit au meilleur des
+        deux rangs, les ops communes gagnent un rang, les rangs s'additionnent.
+        Le plafond d'ops ne concerne plus que ce qui peut ENCORE etre PROPOSE.
+        Le panneau montre A + B -> resultat, les trois listes d'ops, les trois dps.
+        Verifie: 5 ops + 5 ops disjointes -> 10 ops, 0 perdue.
  [x] bouton START pour la sandbox + bouton reset
  [x] reconfigurer la sandbox une fois lancee
      -> bandeau SCHEDULE + UNIT en haut du bench, changement a chaud.
@@ -76,6 +80,6 @@ DONE  (batch of 2026-08-22)
 
 A GARDER EN TETE
 
- - le lance-flamme et le blink n'ont pas encore ete equilibres en conditions
-   reelles au-dela de la simulation headless.
+ - le lance-flamme est cale par mesure de dps sur foule, pas en jeu reel.
+   Le blink (portee 210, cd 1.15s) n'a pas ete teste manette en main.
  - l'ecran de fin ne garde que les 10 meilleurs runs par schedule.

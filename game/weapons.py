@@ -64,7 +64,7 @@ _em('arc', name='CHAIN LOGIT', glyph='z', col=(190, 220, 255), tier=1,
 
 _em('flame', name='FLASH ATTENTION', glyph='f', col=(255, 118, 38), tier=1,
     desc='A sustained cone of fire poured out in front of you. Short range, no gaps.',
-    dmg=3.6, cd=0.13, count=4, speed=440.0, size=7.0, ttl=0.40, pierce=3, cone=0.52,
+    dmg=2.9, cd=0.13, count=4, speed=440.0, size=7.0, ttl=0.40, pierce=3, cone=0.52,
     affinity=('burn', 'giant', 'multishot', 'void'))
 
 _em('turret', name='SENTINEL NODE', glyph='T', col=(140, 255, 140), tier=2,
@@ -359,8 +359,10 @@ class Process:
 			self.heat_decay = 1.5 if 'RUNAWAY' not in self.syn else 0.85
 
 	def op_cap(self):
-		"""A fused process carries more ops than a plain one -- see fuse_plan."""
-		return MAX_OPS_PER_PROC + self.fused
+		"""How many ops this process may still be OFFERED. A merge is allowed to
+		exceed it -- the union is kept whole -- and then simply stops being offered
+		anything new until the ranks catch up."""
+		return max(MAX_OPS_PER_PROC + self.fused, len(self.ops))
 
 	def add_op(self, op, n=1):
 		self.ops[op] = min(MAX_TRAIT_RK, self.ops.get(op, 0) + n)
@@ -450,19 +452,15 @@ class Process:
 def fuse_plan(a, b):
 	"""What merging b into a produces: (ops, rank, dropped).
 
-	A merge must never be a downgrade. Every op survives at least at the higher of
-	the two ranks, shared ops gain one, and the op cap is *raised* by the merge
-	itself, so the ops that would have fallen off the end simply do not.
+	A merge is never a downgrade: nothing is dropped. Every op survives at least at
+	the higher of the two ranks and shared ops gain one. The op cap governs what a
+	process can still be OFFERED, not what a merge may hand it -- paying a whole
+	process for the union is the price, and it has to be worth paying.
 	"""
 	ops = dict(a.ops)
 	for k, v in b.ops.items():
 		ops[k] = min(MAX_TRAIT_RK, max(ops.get(k, 0), v) + (1 if k in a.ops else 0))
-	cap = MAX_OPS_PER_PROC + 1 + a.fused + b.fused
-	dropped = []
-	if len(ops) > cap:
-		for k, _v in sorted(ops.items(), key=lambda kv: (kv[1], kv[0]))[:len(ops) - cap]:
-			dropped.append(k); del ops[k]
-	return ops, a.rank + max(1, min(6, b.rank)), dropped
+	return ops, a.rank + max(1, min(6, b.rank)), []
 
 
 def ghost_process(emit, ops, rank):

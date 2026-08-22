@@ -187,7 +187,12 @@ class Sandbox:
 			for _ in range(n): pl.apply_passive(k)
 		pl.apply_pace(self.w.pace)
 		pl.hp = min(pl.hp, pl.maxhp)
-		if 'slot' not in have: self.w.arsenal.slots = max(4, min(slots, MAX_PROCESSES))
+		# whatever the slot dial was set to by hand survives the rebuild
+		want = max(self.w.arsenal.slots, slots - (1 if pid == 'slot' else 0))
+		self.w.arsenal.slots = int(clamp(want, 1, MAX_PROCESSES))
+		while len(self.w.arsenal.procs) > self.w.arsenal.slots:
+			self.w.arsenal.procs.pop()
+		self.proc = clamp(self.proc, 0, max(0, len(self.w.arsenal.procs) - 1))
 		self.say(PASSIVE_BY_ID[pid]['name'], 'x%d' % have.get(pid, 0), RED)
 
 	def grant_evo(self, ev):

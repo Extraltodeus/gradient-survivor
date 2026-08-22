@@ -90,8 +90,9 @@ does). Ops stack, interact, and rename the thing they are attached to.
 - **19 evolutions** — accumulate the right shape and the process crystallises.
   `pierce 3 + blast 3` on a bolt becomes the RAILGUN OF TRUTH.
 - **Fusion** — merge two processes into one. Every op survives at the better of
-  the two ranks, shared ops gain a rank, the ranks add, and a slot is freed. A
-  merge is never a downgrade: the op cap rises with the merge itself.
+  the two ranks, shared ops gain a rank, the ranks add, and a slot is freed.
+  Nothing is dropped, ever: a merge costs you a whole process, so it has to be
+  worth paying for.
 
 Offers are not random noise: they are weighted toward whatever would make your
 current build *cohere* — ops that finish an evolution, ops that light up a
