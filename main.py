@@ -423,10 +423,6 @@ class Game:
 				if ev.type == pygame.KEYDOWN:
 					if ev.key == pygame.K_RETURN: self.scene = 'select'
 					elif ev.key == pygame.K_ESCAPE: self.scene = 'title'; self.world = None
-					elif ev.key == pygame.K_c and self.world and self.world.win:
-						self.world.win = False
-						self.world.director.advance_biome(self.world)
-						self.scene = 'play'
 		return True
 
 	# ------------------------------------------------------------- update

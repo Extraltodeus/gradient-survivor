@@ -2,7 +2,7 @@
 
 TITLE     = "GRADIENT DESCENT"
 SUBTITLE  = "an AI survivor"
-VERSION   = "1.0"
+VERSION   = "1.1"
 
 W, H      = 1280, 720
 CX, CY    = W // 2, H // 2
