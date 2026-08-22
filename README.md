@@ -53,7 +53,7 @@ vectors and there is nothing to upscale.
 
 | choosing an upgrade | |
 |---|---|
-| `1`–`4` or click | take it |
+| `1`–`5` or click | take it |
 | `R` | reroll the offers |
 | `X` | banish one — it will not be offered again this run |
 | `TAB` or `ESC` | skip, and take +12 integrity instead |
@@ -90,7 +90,11 @@ does). Ops stack, interact, and rename the thing they are attached to.
 
 Offers are not random noise: they are weighted toward whatever would make your
 current build *cohere* — ops that finish an evolution, ops that light up a
-synergy, fusions that free a slot.
+synergy, fusions that free a slot — and pushed apart, so five cards are never
+five variations of the same idea. Every card runs the weapon it is offering, at
+its real cadence and projectile count, and the panel underneath shows where that
+process can still go: each evolution, its recipe, how far along you are, and what
+it looks like when it lands.
 
 ![The level-up screen](docs/levelup.png)
 

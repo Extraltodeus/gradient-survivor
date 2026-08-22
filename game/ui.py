@@ -14,7 +14,7 @@ CONTROLS = (
 	('hold LMB', 'move toward cursor'),
 	('SPACE / RMB', 'dash (brief i-frames)'),
 	('ESC or P', 'pause / this screen'),
-	('1-4 or click', 'pick an upgrade'),
+	('1-5 or click', 'pick an upgrade'),
 	('R / X / TAB', 'reroll / banish / skip'),
 	('TAB (sandbox)', 'open the bench'),
 	('F11 or Alt+Enter', 'fullscreen'),
@@ -319,7 +319,11 @@ def _passive_art(s, rect, key, col, t, ph):
 
 
 def _emit_art(s, rect, key, col, t, ph):
-	"""Diagram for a whole emitter (new process / rank / fusion cards)."""
+	"""Emitter cards run the real scene; the old diagram stays for odd keys."""
+	from game.weapons import E
+	if key in E:
+		_weapon_scene(s, rect, key, col, t)
+		return
 	x, y, w_, h_ = rect
 	cx = x + w_ * 0.5; cy = y + h_ * 0.5
 	P = (cx - 44, cy)
@@ -389,6 +393,235 @@ def _emit_art(s, rect, key, col, t, ph):
 		s.blit(g, (cx - g.get_width() * 0.5, cy - g.get_height() * 0.5))
 
 
+# ========================================================== WEAPON SCENES
+_FOE_DIR = ((0.50, 0.20), (0.68, 0.50), (0.48, 0.80), (0.86, 0.32), (0.84, 0.72))
+
+
+def _scene_box(s, rect):
+	x, y, w_, h_ = rect
+	pygame.draw.rect(s, (8, 10, 17), rect, 0, 6)
+	for gx in range(int(x) + 18, int(x + w_) - 4, 26):
+		pygame.draw.line(s, (16, 20, 30), (gx, y + 3), (gx, y + h_ - 3))
+	for gy in range(int(y) + 16, int(y + h_) - 4, 26):
+		pygame.draw.line(s, (16, 20, 30), (x + 3, gy), (x + w_ - 3, gy))
+	pygame.draw.rect(s, (30, 36, 52), rect, 1, 6)
+
+
+def _agent(s, ax, ay, t):
+	blit_glow(s, ax, ay, 16, CYAN, 0.5)
+	a = math.sin(t * 1.7) * 0.3
+	pygame.draw.polygon(s, CYAN, [(ax + math.cos(a) * 9, ay + math.sin(a) * 9),
+	                              (ax + math.cos(a + 2.5) * 7, ay + math.sin(a + 2.5) * 7),
+	                              (ax + math.cos(a - 2.5) * 7, ay + math.sin(a - 2.5) * 7)])
+
+
+def _weapon_scene(s, rect, emit, col, t, mods=None):
+	"""What the weapon actually does, at its real count and cadence.
+
+	The numbers come from the emitter table, not from the drawing: the loop is its
+	cooldown, the projectile count is its count, and the foes light up when they
+	are actually in the path. A card should not be a label, it should be the thing
+	running."""
+	from game.weapons import E
+	em = E.get(emit)
+	x, y, w_, h_ = rect
+	_scene_box(s, rect)
+	if em is None: return
+	cx = x + w_ * 0.5; cy = y + h_ * 0.5
+	period = clamp(em['cd'] * 1.25, 0.8, 2.1)
+	ph = (t % period) / period
+	n = min(6, max(1, int(em['count'])))
+	radial = emit in ('orbit', 'aura', 'nova', 'spiral', 'beam', 'turret', 'rain')
+	ax = cx if radial else x + w_ * 0.16
+	ay = cy
+	rx = w_ * 0.32; ry = h_ * 0.32
+	foes = []
+	if radial:
+		for i in range(5):
+			a = i * TAU / 5 - 0.5
+			foes.append([cx + math.cos(a) * rx, cy + math.sin(a) * ry, False])
+	else:
+		for fx_, fy_ in _FOE_DIR:
+			foes.append([x + w_ * fx_ + w_ * 0.08, y + h_ * fy_, False])
+
+	if emit == 'bolt':
+		for i in range(n):
+			f = (ph + i * 0.34) % 1.0
+			px = ax + 14 + f * (w_ * 0.84)
+			if px > x + w_ - 6: continue
+			pygame.draw.line(s, shade(col, 0.4), (px - 16, cy), (px, cy), 3)
+			_dot(s, px, cy, 4, col)
+			for q in foes:
+				if abs(q[1] - cy) < 15 and q[0] < px: q[2] = True
+	elif emit == 'swarm':
+		for i in range(n + 1):
+			f = (ph + i / (n + 1.0)) % 1.0
+			tgt = foes[i % len(foes)]
+			px = ax + (tgt[0] - ax) * f
+			py = ay + (tgt[1] - ay) * f + math.sin(f * 7 + i * 2) * 12 * (1 - f)
+			_dot(s, px, py, 3, col, 0.9)
+			if f > 0.88: tgt[2] = True
+	elif emit == 'orbit':
+		pygame.draw.ellipse(s, shade(col, 0.22), pygame.Rect(int(ax - rx), int(ay - ry),
+		                                                     int(rx * 2), int(ry * 2)), 1)
+		for i in range(n):
+			a = t * 2.0 + i * TAU / n
+			px = ax + math.cos(a) * rx; py = ay + math.sin(a) * ry
+			blit_glow(s, px, py, 12, col, 0.85)
+			pygame.draw.circle(s, WHITE, (int(px), int(py)), 3)
+			for q in foes:
+				if abs(q[0] - px) < 15 and abs(q[1] - py) < 15: q[2] = True
+	elif emit == 'aura':
+		r = min(rx, ry) * (1.2 + 0.10 * math.sin(t * 3.4))
+		g = hollow_glow(int(r), col, 0.55)
+		s.blit(g, (ax - g.get_width() * 0.5, ay - g.get_height() * 0.5), None, pygame.BLEND_ADD)
+		pygame.draw.circle(s, shade(col, 0.9), (int(ax), int(ay)), int(r), 2)
+		for q in foes:
+			if math.hypot(q[0] - ax, q[1] - ay) < r: q[2] = True
+	elif emit == 'nova':
+		r = ph * max(rx, ry) * 1.6
+		pygame.draw.circle(s, shade(col, 1.0 - ph), (int(ax), int(ay)), int(r) + 1, 3)
+		pygame.draw.circle(s, shade(WHITE, (1.0 - ph) * 0.8), (int(ax), int(ay)), int(r) + 1, 1)
+		for q in foes:
+			if math.hypot(q[0] - ax, q[1] - ay) < r: q[2] = True
+	elif emit == 'beam':
+		a = t * 1.3
+		L = max(rx, ry) * 1.7
+		ex = ax + math.cos(a) * L; ey = ay + math.sin(a) * L
+		pygame.draw.line(s, shade(col, 0.45), (ax, ay), (ex, ey), 7)
+		pygame.draw.line(s, col, (ax, ay), (ex, ey), 3)
+		pygame.draw.line(s, WHITE, (ax, ay), (ex, ey), 1)
+		for q in foes:
+			d = abs(math.atan2(q[1] - ay, q[0] - ax) - a % TAU)
+			if min(d % TAU, TAU - (d % TAU)) < 0.35: q[2] = True
+	elif emit == 'mine':
+		for i in range(n + 1):
+			f = (ph + i * 0.3) % 1.0
+			mx = ax + 22 + i * (w_ * 0.19); my = cy + math.sin(i * 2.2) * h_ * 0.22
+			if mx > x + w_ - 10: continue
+			if f < 0.72:
+				pulse = 0.4 + 0.6 * abs(math.sin(t * 7 + i))
+				blit_glow(s, mx, my, 11 * pulse, col, 0.9)
+				pygame.draw.circle(s, col, (int(mx), int(my)), 6, 2)
+			else:
+				rr = (f - 0.72) / 0.28
+				pygame.draw.circle(s, shade(col, 1 - rr), (int(mx), int(my)), int(6 + rr * 20), 2)
+				for q in foes:
+					if math.hypot(q[0] - mx, q[1] - my) < 6 + rr * 20: q[2] = True
+	elif emit == 'arc':
+		order = sorted(foes, key=lambda q: math.hypot(q[0] - ax, q[1] - ay))[:4]
+		reach = int(ph * 4) + 1
+		prev = (ax, ay)
+		for i, q in enumerate(order[:reach]):
+			mid = ((prev[0] + q[0]) * 0.5 + math.sin(t * 11 + i) * 7,
+			       (prev[1] + q[1]) * 0.5 - 8)
+			pygame.draw.lines(s, col, False, [prev, mid, (q[0], q[1])], 2)
+			pygame.draw.lines(s, WHITE, False, [prev, mid, (q[0], q[1])], 1)
+			q[2] = True
+			prev = (q[0], q[1])
+	elif emit == 'turret':
+		for i in (-1, 1):
+			tx = ax + w_ * 0.15 * i; ty = ay + h_ * 0.22 * i
+			g = ngon(4, 8, col, 2, t * 1.6)
+			s.blit(g, (tx - g.get_width() * 0.5, ty - g.get_height() * 0.5))
+			blit_glow(s, tx, ty, 12, col, 0.6)
+			q = foes[(0 if i < 0 else 3) % len(foes)]
+			f = (ph + (0.5 if i > 0 else 0.0)) % 1.0
+			px = tx + (q[0] - tx) * f; py = ty + (q[1] - ty) * f
+			_dot(s, px, py, 3, col, 0.9)
+			if f > 0.85: q[2] = True
+	elif emit == 'blade':
+		f = math.sin(ph * math.pi)
+		bx = ax + 16 + f * (w_ * 0.64)
+		by = cy - math.sin(ph * TAU) * h_ * 0.16
+		pygame.draw.arc(s, shade(col, 0.35), pygame.Rect(int(ax + 8), int(cy - h_ * 0.34),
+		                                                 int(w_ * 0.72), int(h_ * 0.68)), 0.2, 3.0, 1)
+		g = ngon(3, 12, col, 0, t * 7)
+		s.blit(g, (bx - g.get_width() * 0.5, by - g.get_height() * 0.5), None, pygame.BLEND_ADD)
+		for q in foes:
+			if math.hypot(q[0] - bx, q[1] - by) < 20: q[2] = True
+	elif emit == 'spiral':
+		for i in range(n + 2):
+			f = (ph + i / (n + 2.0)) % 1.0
+			a = t * 1.8 + i * TAU / (n + 2) + f * 3.4
+			px = ax + math.cos(a) * rx * f * 1.6; py = ay + math.sin(a) * ry * f * 1.6
+			_dot(s, px, py, 3.4, col, 0.9)
+			for q in foes:
+				if math.hypot(q[0] - px, q[1] - py) < 13: q[2] = True
+	elif emit == 'rain':
+		for i in range(n + 1):
+			f = (ph + i * 0.27) % 1.0
+			q = foes[i % len(foes)]
+			if f < 0.62:
+				sy = y + 4 + (q[1] - y - 4) * (f / 0.62)
+				pygame.draw.line(s, col, (q[0], sy - 12), (q[0], sy), 3)
+				pygame.draw.circle(s, shade(col, 0.5), (int(q[0]), int(q[1])), 9, 1)
+			else:
+				rr = (f - 0.62) / 0.38
+				pygame.draw.circle(s, shade(col, 1 - rr), (int(q[0]), int(q[1])), int(4 + rr * 18), 2)
+				q[2] = True
+	else:
+		g = text('?', 26, col, True)
+		s.blit(g, (cx - g.get_width() * 0.5, cy - g.get_height() * 0.5))
+
+	hitpos = [q for q in foes if q[2]]
+	if mods:
+		# what the ops do to a hit, so two evolutions of one emitter never read alike
+		pulse = 0.5 + 0.5 * math.sin(t * 5.0)
+		for i, q in enumerate(hitpos):
+			if 'blast' in mods:
+				pygame.draw.circle(s, shade(ORANGE, 0.9 - 0.5 * pulse),
+				                   (int(q[0]), int(q[1])), int(9 + 9 * pulse), 2)
+			if 'split' in mods:
+				for k in range(3):
+					a = t * 3 + k * 2.1
+					_dot(s, q[0] + math.cos(a) * 13, q[1] + math.sin(a) * 13, 2.2, col, 0.9)
+			if 'frost' in mods:
+				pygame.draw.circle(s, (120, 210, 255), (int(q[0]), int(q[1])), 11, 1)
+			if 'burn' in mods:
+				for k in range(2):
+					_dot(s, q[0] + math.sin(t * 6 + k * 3) * 5, q[1] - 8 - ((t * 22 + k * 11) % 16),
+					     2.0, (255, 150, 60), 0.9)
+			if 'void' in mods:
+				pygame.draw.circle(s, VIOLET, (int(q[0]), int(q[1])), int(14 - 6 * pulse), 1)
+			if 'shock' in mods and i + 1 < len(hitpos):
+				n2 = hitpos[i + 1]
+				pygame.draw.line(s, (150, 220, 255), (q[0], q[1]), (n2[0], n2[1]), 1)
+		if 'chain' in mods:
+			for i in range(len(hitpos) - 1):
+				pygame.draw.line(s, WHITE, (hitpos[i][0], hitpos[i][1]),
+				                 (hitpos[i + 1][0], hitpos[i + 1][1]), 1)
+		if 'crit' in mods and hitpos:
+			q = hitpos[0]
+			g = text('x%d' % (2 + int(pulse * 2)), 12, GOLD, True)
+			s.blit(g, (q[0] + 8, q[1] - 18))
+	for q in foes:
+		_foe(s, q[0], q[1], (150, 160, 190), 7, q[2])
+		if q[2]: blit_glow(s, q[0], q[1], 11, col, 0.5)
+	_agent(s, ax, ay, t)
+
+
+def _fuse_scene(s, rect, ea, eb, col, t):
+	"""Two processes going in, one coming out."""
+	x, y, w_, h_ = rect
+	half = int(w_ * 0.5) - 5
+	loop = (t * 0.45) % 1.0
+	if loop < 0.62:
+		_weapon_scene(s, (x, y, half, h_), ea, col, t)
+		_weapon_scene(s, (x + half + 10, y, half, h_), eb, MAGENTA, t)
+		a = clamp((loop - 0.42) / 0.20, 0.0, 1.0)
+		if a > 0:
+			blit_glow(s, x + w_ * 0.5, y + h_ * 0.5, 12 + 46 * a, MAGENTA, a)
+	else:
+		f = (loop - 0.62) / 0.38
+		_weapon_scene(s, (x, y, w_, h_), ea, mix(col, MAGENTA, 0.5), t)
+		g = ring(int(8 + f * w_ * 0.5), MAGENTA, 2, int(220 * (1 - f)))
+		s.blit(g, (x + w_ * 0.5 - g.get_width() * 0.5, y + h_ * 0.5 - g.get_height() * 0.5),
+		       None, pygame.BLEND_ADD)
+		draw_text(s, 'MERGED', x + w_ * 0.5, y + 5, 12,
+		          shade(MAGENTA, 0.6 + 0.4 * (1 - f)), True, 'tc')
+
+
 def panel(s, rect, alpha=210, border=LINE, radius=8, fill=PANEL):
 	x, y, w, h = rect
 	surf = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -454,10 +687,14 @@ def draw_hud(w, s):
 	else:
 		draw_text(s, 'DASH', dx + 27, dy + 2, 12, CYAN, True, 'ml')
 
-	# ---- processes column
+	# ---- processes column, empty slots included: how much room is left is
+	# information, and it decides whether a new emitter is even offerable
 	py = 78
 	for pr in w.arsenal.procs:
 		draw_proc_row(w, s, 10, py, pr)
+		py += 46
+	for i in range(len(w.arsenal.procs), w.arsenal.slots):
+		draw_empty_slot(s, 10, py, i + 1)
 		py += 46
 
 	# ---- rerolls / banish
@@ -541,6 +778,19 @@ def draw_hud(w, s):
 			s.blit(v, (0, 0))
 
 
+def draw_empty_slot(s, x, y, n):
+	size = 30
+	pygame.draw.rect(s, (22, 27, 40), (x, y, size, size), 0, 5)
+	pygame.draw.rect(s, (40, 48, 68), (x, y, size, size), 1, 5)
+	g = text('+', 17, (58, 68, 92), True)
+	s.blit(g, (x + size * 0.5 - g.get_width() * 0.5, y + size * 0.5 - g.get_height() * 0.5))
+	draw_text(s, 'PROCESS SLOT %d' % n, x + size + 8, y + 3, 11, (54, 64, 86), True)
+	draw_text(s, 'empty', x + size + 8, y + 17, 10, (44, 52, 72))
+	for k in range(0, 62, 6):
+		pygame.draw.line(s, (32, 38, 54), (x + size + 8 + k, y + size + 2),
+		                 (x + size + 11 + k, y + size + 2))
+
+
 def draw_proc_row(w, s, x, y, pr):
 	pl = w.player
 	c = pr.stats(pl)
@@ -584,6 +834,9 @@ class LevelUp:
 		self.done = None
 		self.snap = None
 		self.rects = []
+		self.avoid = []          # keys of the last two rerolls, kept off the table
+		self.tree = []
+		self.tree_hover = None
 
 	def snapshot(self, s):
 		small = pygame.transform.smoothscale(s, (W // 6, H // 6))
@@ -606,7 +859,7 @@ class LevelUp:
 				return
 			elif ev.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_e):
 				self.pick(w)
-			elif pygame.K_1 <= ev.key <= pygame.K_4:
+			elif pygame.K_1 <= ev.key <= pygame.K_5:
 				i = ev.key - pygame.K_1
 				if i < n: self.sel = i; self.pick(w)
 			elif ev.key == pygame.K_r:
@@ -640,7 +893,9 @@ class LevelUp:
 			w.audio.play('deny', 0.8); return
 		w.player.rerolls -= 1
 		from game.offers import build_offers
-		self.offers = build_offers(w, len(self.offers))
+		self.avoid.insert(0, set(o.key for o in self.offers))
+		del self.avoid[2:]
+		self.offers = build_offers(w, len(self.offers), set().union(*self.avoid))
 		self.sel = min(self.sel, len(self.offers) - 1)
 		self.t = 0.0
 		w.audio.play('gem', 0.8)
@@ -651,7 +906,7 @@ class LevelUp:
 		w.player.banishes -= 1
 		w.banned.add(self.offers[self.sel].key)
 		from game.offers import build_offers
-		self.offers = build_offers(w, len(self.offers))
+		self.offers = build_offers(w, len(self.offers), set().union(*self.avoid) if self.avoid else None)
 		self.sel = min(self.sel, len(self.offers) - 1)
 		self.t = 0.0
 		w.audio.play('deny', 1.0)
@@ -670,19 +925,18 @@ class LevelUp:
 		t = min(1.0, self.t * 3.4)
 		e = ease_out(t)
 
-		draw_text(s, 'EPOCH %d' % w.player.level, CX, int(46 - 20 * (1 - e)), 34, INK, True, 'tc')
+		draw_text(s, 'EPOCH %d' % w.player.level, CX, int(26 - 14 * (1 - e)), 30, INK, True, 'tc')
 		locked = self.t < GRACE
-		draw_text(s, 'select a mutation', CX, 86, 14, INK_DIM if not locked else INK_FAINT, False, 'tc')
+		draw_text(s, 'select a mutation', CX, 60, 13, INK_DIM if not locked else INK_FAINT, False, 'tc')
 		if locked:
-			bar(s, CX - 60, 106, 120, 3, self.t / GRACE, shade(CYAN, 0.55), (22, 26, 36), 2)
+			bar(s, CX - 60, 80, 120, 3, self.t / GRACE, shade(CYAN, 0.55), (22, 26, 36), 2)
 
 		n = len(self.offers)
-		cw = 286 if n <= 3 else 250
-		gap = 22
-		total = n * cw + (n - 1) * gap
-		x0 = CX - total * 0.5
-		ch = 392
-		cy = 124
+		gap = 14
+		cw = int(min(320, (W - 56 - (n - 1) * gap) / n))
+		ch = int(clamp((H - 150) * 0.58, 300, 460))
+		cy = 92
+		x0 = CX - (n * cw + (n - 1) * gap) * 0.5
 		self.rects = []
 		mouse = pygame.mouse.get_pos()
 
@@ -692,9 +946,15 @@ class LevelUp:
 			self.rects.append(r)
 			self.draw_card(s, o, r, i == self.sel, e, i, n)
 
-		# footer
+		# --- what the selected card leads to, in the space nobody was using
+		ty = cy + ch + 12
+		th = int(clamp(H - ty - 42, 120, 380))
+		if th > 110 and self.offers:
+			draw_tree(s, (28, ty, W - 56, th), w, self.offers[clamp(self.sel, 0, n - 1)],
+			          self.t, mouse)
+
 		pl = w.player
-		fy = cy + ch + 22
+		fy = H - 30
 		dim = self.t < GRACE
 		items = [('ENTER / CLICK', 'take', INK_FAINT if dim else INK),
 		         ('R', 'reroll (%d)' % pl.rerolls, INK_FAINT if dim else (GOLD if pl.rerolls else INK_FAINT)),
@@ -717,75 +977,71 @@ class LevelUp:
 		rr = pygame.Rect(r.x, r.y + off, r.w, r.h)
 		col = o.col
 		rare = RARITY_COL.get(o.rarity, INK_DIM)
+		head = 84
 
 		surf = pygame.Surface((rr.w, rr.h), pygame.SRCALPHA)
 		a = int(238 * t)
 		pygame.draw.rect(surf, (13, 16, 24, a), (0, 0, rr.w, rr.h), 0, 10)
 		pygame.draw.rect(surf, (rare[0], rare[1], rare[2], int((255 if sel else 110) * t)),
 		                 (0, 0, rr.w, rr.h), 2 if sel else 1, 10)
-		# header band
-		pygame.draw.rect(surf, (col[0] // 5, col[1] // 5, col[2] // 5, a), (0, 0, rr.w, 92), 0, 10)
-		pygame.draw.line(surf, (rare[0], rare[1], rare[2], int(160 * t)), (0, 92), (rr.w, 92))
+		pygame.draw.rect(surf, (col[0] // 5, col[1] // 5, col[2] // 5, a), (0, 0, rr.w, head), 0, 10)
+		pygame.draw.line(surf, (rare[0], rare[1], rare[2], int(160 * t)), (0, head), (rr.w, head))
 		s.blit(surf, rr.topleft)
 
 		if sel:
 			blit_glow(s, rr.centerx, rr.centery, 260, shade(col, 0.5), 0.30)
 
-		glyph_box(s, rr.x + 16, rr.y + 18, 56, o.glyph, col, (10, 13, 20))
-		draw_text(s, trim(o.title, 20), rr.x + 84, rr.y + 22, 19, INK, True)
-		draw_text(s, trim(o.sub, 24), rr.x + 84, rr.y + 47, 12, shade(col, 0.95))
-		# (rank pips are drawn below for op cards)
+		glyph_box(s, rr.x + 14, rr.y + 14, 48, o.glyph, col, (10, 13, 20))
+		draw_text(s, trim(o.title, int((rr.w - 100) / 9.2)), rr.x + 72, rr.y + 16, 18, INK, True)
+		draw_text(s, trim(o.sub, int((rr.w - 80) / 6.6)), rr.x + 72, rr.y + 40, 12, shade(col, 0.95))
 		kindlbl = {'op': 'OP', 'new': 'EMITTER', 'rank': 'RANK', 'passive': 'SYSTEM',
 		           'fuse': 'FUSION', 'heal': 'REPAIR'}.get(o.kind, '')
-		draw_text(s, kindlbl, rr.x + rr.w - 14, rr.y + 68, 11, rare, True, 'tr')
+		draw_text(s, kindlbl, rr.x + rr.w - 14, rr.y + 62, 11, rare, True, 'tr')
 		if o.kind == 'op' and o.proc is not None:
 			cur = o.proc.ops.get(o.key[3:], 0)
-			pips(s, rr.x + 84, rr.y + 68, cur + 1, MAX_TRAIT_RK, col)
+			pips(s, rr.x + 72, rr.y + 62, cur + 1, MAX_TRAIT_RK, col)
+		draw_text(s, str(i + 1), rr.x + rr.w - 14, rr.y + 14, 14, INK_FAINT, True, 'tr')
 
-		# --- animated diagram of the actual effect
-		art_key = o.key.split(':', 1)[1] if ':' in o.key else o.key
-		if o.kind == 'fuse': art_key = o.proc.emit if o.proc else 'bolt'
-		elif o.kind == 'rank': art_key = o.proc.emit if o.proc else 'bolt'
-		draw_art(s, (rr.x + 14, rr.y + 100, rr.w - 28, 78), o.kind, art_key, col, self.t)
+		# --- the effect, running
+		ah = int(rr.h * 0.34)
+		art = (rr.x + 12, rr.y + head + 10, rr.w - 24, ah)
+		if o.kind == 'fuse' and isinstance(o.ops_preview, tuple):
+			_scene_box(s, art)
+			_fuse_scene(s, art, o.ops_preview[0], o.ops_preview[1], col, self.t)
+		else:
+			art_key = o.key.split(':', 1)[1] if ':' in o.key else o.key
+			if o.kind == 'rank': art_key = o.proc.emit if o.proc else 'bolt'
+			draw_art(s, art, o.kind, art_key, col, self.t)
 
-		y = rr.y + 186
-		for line in wrap(o.desc, 13, rr.w - 32)[:3]:
-			draw_text(s, line, rr.x + 16, y, 13, INK_DIM)
-			y += 17
-
-		# the note banner is laid out first: it owns the bottom of the card, and
-		# everything above has to know where it stops
+		y = art[1] + ah + 12
 		note_lines = wrap(o.note, 12, rr.w - 34)[:2] if o.note else []
 		note_h = 18 + 15 * len(note_lines)
 		note_top = rr.y + rr.h - (note_h + 10 if note_lines else 12)
 
-		# process preview
+		for line in wrap(o.desc, 13, rr.w - 32)[:3]:
+			draw_text(s, line, rr.x + 16, y, 13, INK_DIM)
+			y += 17
+
 		if o.proc is not None and o.kind in ('op', 'rank', 'fuse'):
-			y = max(y + 10, rr.y + 244)
-			pygame.draw.line(s, LINE, (rr.x + 16, y - 8), (rr.x + rr.w - 16, y - 8))
-			draw_text(s, 'PROCESS STATE', rr.x + 16, y, 10, INK_FAINT, True)
-			y += 16
-			ox = rr.x + 16
-			for k, v in sorted(o.proc.ops.items(), key=lambda kv: -kv[1]):
-				d = O[k]
-				cc = d['col'] or INK_DIM
-				lbl = d['glyph'] + rk(v)
-				g = text(lbl, 13, cc, True)
-				if ox + g.get_width() + 6 > rr.x + rr.w - 16:
-					ox = rr.x + 16; y += 17
-				s.blit(g, (ox, y))
-				ox += g.get_width() + 9
-			y += 22
-			for sid in o.proc.syn:
-				draw_text(s, '* ' + sid, rr.x + 16, y, 11, VIOLET, True)
-				y += 14
-			p = o.proc.evo_progress()
-			if p and not o.proc.evo and y + 26 < note_top:
-				ev, missing, frac = p
-				draw_text(s, trim(ev['name'], 24), rr.x + 16, y + 4, 11, shade(GOLD, 0.8), True)
-				bar(s, rr.x + 16, y + 20, rr.w - 32, 3, frac, GOLD, (30, 28, 20), 2)
-			elif o.proc.evo and y + 16 < note_top:
-				draw_text(s, 'EVOLVED', rr.x + 16, y + 4, 11, GOLD, True)
+			y += 8
+			if y + 30 < note_top:
+				pygame.draw.line(s, LINE, (rr.x + 16, y - 6), (rr.x + rr.w - 16, y - 6))
+				draw_text(s, 'PROCESS STATE', rr.x + 16, y, 10, INK_FAINT, True)
+				y += 15
+				ox = rr.x + 16
+				for k, v in sorted(o.proc.ops.items(), key=lambda kv: -kv[1]):
+					d = O[k]
+					cc = d['col'] or INK_DIM
+					g = text(d['glyph'] + rk(v), 13, cc, True)
+					if ox + g.get_width() + 6 > rr.x + rr.w - 16:
+						ox = rr.x + 16; y += 16
+					s.blit(g, (ox, y))
+					ox += g.get_width() + 9
+				y += 20
+				for sid in o.proc.syn:
+					if y + 12 > note_top: break
+					draw_text(s, '* ' + sid, rr.x + 16, y, 11, VIOLET, True)
+					y += 14
 
 		if note_lines:
 			pygame.draw.rect(s, (o.note_col[0] // 6, o.note_col[1] // 6, o.note_col[2] // 6),
@@ -793,7 +1049,92 @@ class LevelUp:
 			for j, line in enumerate(note_lines):
 				draw_text(s, line, rr.x + rr.w * 0.5, note_top + 6 + j * 15, 12, o.note_col, True, 'tc')
 
-		draw_text(s, str(i + 1), rr.x + rr.w - 16, rr.y + 16, 14, INK_FAINT, True, 'tr')
+
+# ============================================================ COMBINATION TREE
+def _tree_node(s, r, title, sub, col, emit, t, sel, prog=None, chips=(), gold=False, mods=None):
+	bg = (18, 22, 33) if not sel else (26, 31, 46)
+	pygame.draw.rect(s, bg, r, 0, 8)
+	pygame.draw.rect(s, col if sel else shade(col, 0.45), r, 2 if sel else 1, 8)
+	draw_text(s, trim(title, int(r.w / 7.6)), r.centerx, r.y + 7, 13, col if gold else INK, True, 'tc')
+	if sub:
+		draw_text(s, trim(sub, int(r.w / 5.6)), r.centerx, r.y + 24, 10, INK_FAINT, False, 'tc')
+	sh = r.h - 44 - (16 if chips else 0) - (8 if prog is not None else 0)
+	if sh > 30 and emit:
+		sw = min(r.w - 16, int(sh * 2.2))
+		_weapon_scene(s, (r.centerx - sw * 0.5, r.y + 40, sw, sh), emit, col, t, mods)
+	y = r.y + 44 + max(0, sh)
+	if chips:
+		ox = r.x + 8
+		for glyph, have, need, cc in chips:
+			lbl = '%s%d/%d' % (glyph, have, need)
+			g = text(lbl, 11, cc if have >= need else INK_FAINT, have >= need)
+			if ox + g.get_width() + 6 > r.right - 8: break
+			s.blit(g, (ox, y))
+			ox += g.get_width() + 8
+		y += 15
+	if prog is not None:
+		bar(s, r.x + 8, y, r.w - 16, 3, prog, GOLD if gold else col, (30, 34, 46), 2)
+
+
+def draw_tree(s, rect, w, o, t, mouse):
+	"""Where the selected card actually leads.
+
+	The emitter it touches, every evolution that emitter can reach, and how far the
+	current process is along each recipe -- each node running its own animation, so
+	the shape of the choice is visible instead of implied."""
+	x, y, w_, h_ = rect
+	panel(s, rect, 205)
+	proc = o.proc
+	emit = None
+	if o.kind == 'new': emit = o.key.split(':', 1)[1] if ':' in o.key else o.key
+	elif proc is not None: emit = proc.emit
+	if emit is None and w.arsenal.procs:
+		proc = max(w.arsenal.procs, key=lambda p: p.power(w.player))
+		emit = proc.emit
+	if emit is None: return
+
+	em = E.get(emit, {})
+	draw_text(s, 'WHERE THIS LEADS', x + 14, y + 8, 11, INK_FAINT, True)
+	draw_text(s, em.get('name', ''), x + 150, y + 8, 11, shade(em.get('col', INK), 0.9), True)
+
+	evos = list(EVO_BY_EMIT.get(emit, ()))
+	have = proc.ops if proc is not None else {}
+	cols = 1 + len(evos)
+	gapx = 14
+	nw = int((w_ - 28 - (cols - 1) * gapx) / max(1, cols))
+	ny = y + 28
+	nh = h_ - 28 - 34
+	hover = None
+
+	r0 = pygame.Rect(x + 14, ny, nw, nh)
+	sub = 'rank %d' % proc.rank if proc is not None else 'not running yet'
+	chips = [(O[k]['glyph'], v, v, O[k]['col'] or INK) for k, v in
+	         sorted(have.items(), key=lambda kv: -kv[1])[:5]]
+	_tree_node(s, r0, em.get('name', emit), sub, em.get('col', INK), emit, t,
+	           r0.collidepoint(mouse), None, chips)
+	if r0.collidepoint(mouse): hover = (em.get('name', emit), em.get('desc', ''))
+
+	for i, ev in enumerate(evos):
+		rx = x + 14 + (i + 1) * (nw + gapx)
+		r = pygame.Rect(rx, ny, nw, nh)
+		req = ev['req']
+		got = sum(min(have.get(k, 0), v) for k, v in req.items())
+		need = sum(req.values())
+		done = proc is not None and proc.evo is ev
+		chips = [(O[k]['glyph'], have.get(k, 0), v, O[k]['col'] or INK) for k, v in req.items()]
+		pygame.draw.line(s, shade(GOLD, 0.35), (r0.right, ny + nh * 0.5), (rx, ny + nh * 0.5), 1)
+		_tree_node(s, r, ev['name'], 'EVOLVED' if done else 'evolution', GOLD, emit, t,
+		           r.collidepoint(mouse), got / max(1, need), chips, True, req)
+		if r.collidepoint(mouse): hover = (ev['name'], ev['desc'])
+
+	if hover is None and evos:
+		best = max(evos, key=lambda ev: sum(min(have.get(k, 0), v) for k, v in ev['req'].items()))
+		hover = (best['name'], best['desc'])
+	if hover:
+		draw_text(s, hover[0], x + 14, y + h_ - 24, 12, GOLD, True)
+		draw_text(s, trim(hover[1], int((w_ - 60) / 6.4)), x + 20 + text_w(hover[0], 12, True),
+		          y + h_ - 24, 12, INK_DIM)
+	draw_text(s, 'hover a node', x + w_ - 14, y + 8, 10, INK_FAINT, False, 'tr')
 
 
 # ================================================================= PAUSE

@@ -79,6 +79,7 @@ class World:
 		self.stats = {'kills': 0, 'dmg': 0.0, 'taken': 0.0, 'xp': 0.0, 'evos': 0, 'fuses': 0}
 		self.dps = 0.0
 		self._dmg_prev = 0.0
+		self.last_drop = {}
 		self.evo_log = []
 		self.backdrop.set_biome(self.level)
 		self.audio.set_music(self.level['music'])
@@ -315,6 +316,29 @@ class World:
 				pygame.draw.circle(s, shade(h.col, 0.8), (int(x), int(y)), rr, 3)
 				pygame.draw.circle(s, shade(h.col, 0.35), (int(x), int(y)), rr + 6, 1)
 
+	def maybe_drop(self, kind, x, y, val=1):
+		"""Consumables are offered when they would matter, not on a raw dice roll.
+
+		At a hundred and forty kills a second even a 0.35% chance is several bombs
+		per second, which is not a pickup any more, it is weather. So each one has
+		a reason to exist (integrity when hurt, a bomb when actually swarmed, a
+		magnet when the floor is littered) and a floor on how often it can appear.
+		Anything refused becomes experience, so the kill still pays."""
+		pl = self.player
+		d = self.director
+		gap, want = {
+			'hp':     (1.4, pl.hp < pl.maxhp * 0.85),
+			'bomb':   (18.0, len(self.enemies) > max(40, d.target_alive * 0.62)),
+			'magnet': (12.0, len(self.pickups) > 45),
+			'clock':  (24.0, pl.hp < pl.maxhp * 0.55 or len(self.enemies) > d.target_alive * 0.85),
+		}[kind]
+		if want and self.t - self.last_drop.get(kind, -99.0) >= gap:
+			self.last_drop[kind] = self.t
+			drop(self, kind, x, y, val)
+			return True
+		drop(self, 'xp', x, y, 3 + int(d.tier * 2))
+		return False
+
 	# ----------------------------------------------------------------- death
 	def on_enemy_death(self, e):
 		rng = self.rng
@@ -345,13 +369,13 @@ class World:
 		r = rng.random()
 		if e.elite:
 			if r < 0.30 + luck * 0.5: drop(self, 'chest', e.x, e.y)
-			elif r < 0.8: drop(self, 'hp', e.x, e.y, 25)
-			else: drop(self, 'bomb', e.x, e.y)
+			elif r < 0.74: self.maybe_drop('hp', e.x, e.y, 25)
+			else: self.maybe_drop('bomb', e.x, e.y)
 		else:
-			if r < 0.008: drop(self, 'hp', e.x, e.y, 18)
-			elif r < 0.013: drop(self, 'magnet', e.x, e.y)
-			elif r < 0.0165: drop(self, 'bomb', e.x, e.y)
-			elif r < 0.019: drop(self, 'clock', e.x, e.y)
+			if r < 0.010: self.maybe_drop('hp', e.x, e.y, 18)
+			elif r < 0.014: self.maybe_drop('magnet', e.x, e.y)
+			elif r < 0.017: self.maybe_drop('bomb', e.x, e.y)
+			elif r < 0.019: self.maybe_drop('clock', e.x, e.y)
 		self.director.kills_recent += 1.0
 
 	def spawn_boss_clone(self, e, a):

@@ -23,6 +23,7 @@ def _mk(kind, key, title, sub, desc, col, rarity, glyph, apply, proc=None,
 	o.kind = kind; o.key = key; o.title = title; o.sub = sub; o.desc = desc
 	o.col = col; o.rarity = rarity; o.glyph = glyph; o.apply = apply
 	o.proc = proc; o.note = note; o.note_col = note_col; o.weight = weight
+	o.ops_preview = None
 	return o
 
 
@@ -61,14 +62,15 @@ def _evo_step(proc, op):
 	return None
 
 
-def build_offers(w, n=None):
+def build_offers(w, n=None, avoid=None):
 	pl = w.player
 	ar = w.arsenal
 	rng = w.rng
 	banned = w.banned
 	luck = pl.luck
 	if n is None:
-		n = 3 + (1 if rng.random() < 0.14 + luck * 0.8 else 0)
+		n = 4 + (1 if rng.random() < 0.16 + luck * 0.8 else 0)
+	avoid = avoid or ()
 
 	pool = []
 
@@ -153,24 +155,43 @@ def build_offers(w, n=None):
 		cands.sort(key=lambda p: -p.power(pl))
 		a, b = cands[0], cands[1]
 		key = 'fuse:%d:%d' % (a.uid, b.uid)
-		pool.append(_mk('fuse', key, 'MERGE', a.name + '  <-  ' + b.name,
-		                'Fuse both processes: union of every op (ranked up), ranks added, one slot freed.',
-		                MAGENTA, 3, '&', _apply_fuse(w, a, b), a,
-		                'destroys ' + b.name, RED, 11.0))
+		fo = _mk('fuse', key, 'MERGE', a.name + '  <-  ' + b.name,
+		         'Fuse both processes: union of every op (ranked up), ranks added, one slot freed.',
+		         MAGENTA, 3, '&', _apply_fuse(w, a, b), a,
+		         'destroys ' + b.name, RED, 11.0)
+		fo.ops_preview = (a.emit, b.emit)
+		pool.append(fo)
 
 	# ------------------------------------------------------------- selection
+	# Two pressures on top of the raw weights: whatever was just rerolled away is
+	# pushed out of the way, and each kind (and each process) gets progressively
+	# cheaper to skip once it is already on the table -- four op cards for the same
+	# process is technically a roll of the dice and practically a non-choice.
 	out = []
 	seen = set()
 	guard = 0
+	kinds = {}
+	procs = {}
+	fresh = [x for x in pool if x.key not in avoid]
+	if len(fresh) >= n: pool = fresh
+
+	def _w(x):
+		f = x.weight * (0.30 ** kinds.get(x.kind, 0))
+		if x.proc is not None:
+			f *= 0.5 ** procs.get(id(x.proc), 0)
+		return f
+
 	while len(out) < n and pool and guard < 400:
 		guard += 1
-		o = weighted(rng, [(x, x.weight) for x in pool])
+		o = weighted(rng, [(x, _w(x)) for x in pool])
 		if o is None: break
 		pool.remove(o)
 		if o.key in seen: continue
 		if o.kind == 'op' and any(x.kind == 'op' and x.proc is o.proc and x.key == o.key for x in out):
 			continue
 		seen.add(o.key)
+		kinds[o.kind] = kinds.get(o.kind, 0) + 1
+		if o.proc is not None: procs[id(o.proc)] = procs.get(id(o.proc), 0) + 1
 		out.append(o)
 	if not out:
 		out.append(_mk('heal', 'heal', 'DEFRAGMENT', 'SYSTEM', 'Restore 40 integrity.',
