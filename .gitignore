@@ -3,7 +3,6 @@ __pycache__/
 save.json
 shots/
 # my own working notes, not part of the project
-TODO.txt
 build/
 # keep the two build assets, ignore anything else dropped in there
 misc/*
@@ -11,3 +10,4 @@ misc/*
 !misc/gradient.ico
 dist/
 GradientDescent.spec
+todo*

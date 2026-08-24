@@ -416,7 +416,9 @@ def _emit_art(s, rect, key, col, t, ph):
 # Every scene below takes the real stats of the process being offered (count,
 # cadence, size) plus its real op set, so two evolutions of one emitter can never
 # come out looking like the same animation in a different tint.
-_FOE_DIR = ((0.50, 0.20), (0.68, 0.50), (0.48, 0.80), (0.86, 0.32), (0.84, 0.72))
+# Three of them stand in a lane and two off it: PIERCE has something to punch
+# through and CHAIN has somewhere to jump, instead of one lonely target.
+_FOE_DIR = ((0.40, 0.50), (0.60, 0.50), (0.80, 0.50), (0.52, 0.20), (0.74, 0.80))
 
 
 def _scene_box(s, rect):
@@ -436,24 +438,29 @@ def _agent(s, ax, ay, t, shape='dart', col=CYAN):
 
 def _curve(ax, ay, tx, ty, f, ops, t, i):
 	"""Where a projectile is at 0..1 along its flight, bent by whatever ops the
-	process is carrying. This is why HOMING and BOUNCE and SPIN read differently
-	on the card instead of all being a straight line."""
+	process is carrying -- and by how far those ops are ranked up. This is why
+	HOMING II and HOMING IV are not the same arc."""
 	x = ax + (tx - ax) * f
 	y = ay + (ty - ay) * f
 	dx = tx - ax; dy = ty - ay
 	L = math.hypot(dx, dy) or 1.0
 	nx = -dy / L; ny = dx / L
 	off = 0.0
-	if ops.get('homing'):
-		off += math.sin(f * math.pi) * 30.0 * (1.0 - f) * (1 if i % 2 == 0 else -1)
-	if ops.get('bounce'):
-		off += (1.0 - abs((f * 3.0 % 1.0) * 2.0 - 1.0)) * 22.0 * (1 if int(f * 3) % 2 == 0 else -1)
-	if ops.get('orbitize'):
-		off += math.sin(f * 9.0 + t * 3.0 + i) * 16.0 * f
+	hm = ops.get('homing', 0)
+	if hm:
+		off += math.sin(f * math.pi) * (14.0 + 8.0 * hm) * (1.0 - f) * (1 if i % 2 == 0 else -1)
+	bo = ops.get('bounce', 0)
+	if bo:
+		legs = 1 + bo
+		seg = f * legs
+		off += (1.0 - abs((seg % 1.0) * 2.0 - 1.0)) * (10.0 + 5.0 * bo) * (1 if int(seg) % 2 == 0 else -1)
+	sn = ops.get('orbitize', 0)
+	if sn:
+		off += math.sin(f * (4.0 + 2.2 * sn) + t * 3.0 + i) * (7.0 + 4.5 * sn) * f
 	return x + nx * off, y + ny * off
 
 
-def _weapon_scene(s, rect, emit, col, t, ops=None, st=None, shape='dart', pcol=CYAN):
+def _weapon_scene(s, rect, emit, col, t, ops=None, st=None, shape='dart', pcol=CYAN, focus=None):
 	from game.weapons import E
 	em = E.get(emit)
 	x, y, w_, h_ = rect
@@ -464,7 +471,7 @@ def _weapon_scene(s, rect, emit, col, t, ops=None, st=None, shape='dart', pcol=C
 	n = int(st['count']) if st else int(em['count'])
 	n = max(1, min(8, n))
 	base_sz = em['size'] or 1.0
-	szf = clamp((st['size'] / base_sz) if st else 1.0, 0.55, 2.2)
+	szf = clamp((st['size'] / base_sz) if st else 1.0, 0.55, 3.2)   # GIANT V must look like GIANT V
 	cx = x + w_ * 0.5; cy = y + h_ * 0.5
 	period = clamp(cd * 1.25, 0.34, 2.1)
 	ph = (t % period) / period
@@ -477,22 +484,53 @@ def _weapon_scene(s, rect, emit, col, t, ops=None, st=None, shape='dart', pcol=C
 		for i in range(5):
 			a = i * TAU / 5 - 0.5
 			foes.append([cx + math.cos(a) * rx, cy + math.sin(a) * ry, False])
-	else:
-		for fx_, fy_ in _FOE_DIR:
-			foes.append([x + w_ * fx_ + w_ * 0.08, y + h_ * fy_, False])
 	pierce = ops.get('pierce', 0) + (3 if emit == 'flame' else (2 if emit == 'blade' else 0))
+	if not radial:
+		# A lane of bodies to punch through, plus two off it to chain to. The lane
+		# grows with PIERCE and CHAIN: a shot that goes through five needs five to
+		# go through, or ranks four and five draw the picture rank three drew.
+		lane = int(clamp(3 + max(pierce, ops.get('chain', 0)) - 2, 3, 6))
+		for k in range(lane):
+			fx_ = 0.34 + (0.52 / max(1, lane - 1)) * k
+			foes.append([x + w_ * fx_, y + h_ * 0.5, False])
+		foes.append([x + w_ * 0.58, y + h_ * 0.20, False])
+		foes.append([x + w_ * 0.80, y + h_ * 0.80, False])
 	old = s.get_clip()
 	s.set_clip(pygame.Rect(int(x) + 1, int(y) + 1, int(w_) - 2, int(h_) - 2))
 
 	if emit == 'bolt':
+		mo = ops.get('momentum', 0)
 		for i in range(n):
 			f = (ph + i / float(n)) % 1.0
-			tx = x + w_ - 8; ty = cy + (i - (n - 1) * 0.5) * 13
-			px, py = _curve(ax, ay, tx, ty, f, ops, t, i)
+			# aim through a body, not into empty space: PIERCE and CHAIN have
+			# nothing to show on a shot that only ever meets one target
+			aim = foes[i % len(foes)]
+			adx, ady = aim[0] - ax, aim[1] - ay
+			am = math.hypot(adx, ady) or 1.0
+			# carry the shot to the far edge, or PIERCE runs out of bodies before
+			# it runs out of ranks
+			reach2 = w_ * 1.15
+			ex = ax + adx / am * reach2; ey = ay + ady / am * reach2
+			px, py = _curve(ax, ay, ex, ey, f, ops, t, i)
 			pygame.draw.line(s, shade(col, 0.4), (px - 15, py), (px, py), max(2, int(3 * szf)))
-			_dot(s, px, py, 4 * szf, col)
-			for q in foes:
-				if abs(q[1] - py) < 16 and q[0] < px and (pierce or not q[2]): q[2] = True
+			_dot(s, px, py, (4.0 + 2.2 * f * mo) * szf, col)
+			# one chevron per remaining perforation: past three bodies the scene
+			# runs out of targets, but the count still has to be readable
+			for k in range(pierce - (2 if emit == 'blade' else 0)):
+				cx2 = px - 8 - k * 5
+				pygame.draw.line(s, shade(col, 0.85 - 0.1 * k), (cx2, py - 4), (cx2 + 3, py), 1)
+				pygame.draw.line(s, shade(col, 0.85 - 0.1 * k), (cx2, py + 4), (cx2 + 3, py), 1)
+			travelled = math.hypot(px - ax, py - ay)
+			through = 0
+			for q in sorted(foes, key=lambda z: math.hypot(z[0] - ax, z[1] - ay)):
+				d = math.hypot(q[0] - ax, q[1] - ay)
+				if d > travelled: continue
+				# distance from the shot's line, so only what is on the path counts
+				if abs((q[0] - ax) * (py - ay) - (q[1] - ay) * (px - ax)) / max(1.0, travelled) > 17:
+					continue
+				if through > pierce: break
+				q[2] = True
+				through += 1
 	elif emit == 'flame':
 		# a cone, not a volley: the damage is in the overlap
 		reach = w_ * 0.62 * (1.0 + 0.12 * ops.get('giant', 0))
@@ -502,7 +540,7 @@ def _weapon_scene(s, rect, emit, col, t, ops=None, st=None, shape='dart', pcol=C
 			a = (i * 2.399) % (cone * 2) - cone
 			d = f * reach
 			px = ax + math.cos(a) * d; py = ay + math.sin(a) * d * 0.8
-			r = (3.0 + f * 9.0) * szf
+			r = (3.0 + f * 9.0) * min(szf, 1.7)   # a cone of fire, not a white sheet
 			blit_glow(s, px, py, r * 2.2, mix((255, 220, 120), col, min(1.0, f * 1.4)), 0.9 - f * 0.45)
 		for q in foes:
 			d = math.hypot(q[0] - ax, q[1] - ay)
@@ -629,65 +667,133 @@ def _weapon_scene(s, rect, emit, col, t, ops=None, st=None, shape='dart', pcol=C
 		g = text('?', 26, col, True)
 		s.blit(g, (cx - g.get_width() * 0.5, cy - g.get_height() * 0.5))
 
-	# ---- what the ops do once something is hit
+	# ---- what the ops do once something is hit, at the rank they are actually at
 	hitpos = [q for q in foes if q[2]]
 	pulse = 0.5 + 0.5 * math.sin(t * 5.0)
 	for i, q in enumerate(hitpos):
-		if ops.get('blast'):
-			pygame.draw.circle(s, shade(ORANGE, 0.9 - 0.5 * pulse),
-			                   (int(q[0]), int(q[1])), int((9 + 9 * pulse) * (1 + 0.2 * ops['blast'])), 2)
-		if ops.get('split'):
-			for k in range(2 + ops['split']):
-				a = t * 3 + k * 2.1
-				_dot(s, q[0] + math.cos(a) * 13, q[1] + math.sin(a) * 13, 2.2, col, 0.9)
-		if ops.get('frost'):
-			pygame.draw.circle(s, (120, 210, 255), (int(q[0]), int(q[1])), 11, 1)
-			for k in range(4):
-				a = k * TAU / 4 + t * 0.4
-				pygame.draw.line(s, (120, 210, 255), (q[0] + math.cos(a) * 7, q[1] + math.sin(a) * 7),
-				                 (q[0] + math.cos(a) * 13, q[1] + math.sin(a) * 13), 1)
-		if ops.get('burn'):
-			for k in range(2):
-				_dot(s, q[0] + math.sin(t * 6 + k * 3) * 5, q[1] - 8 - ((t * 22 + k * 11) % 16),
-				     2.0, (255, 150, 60), 0.9)
-		if ops.get('void'):
-			pygame.draw.circle(s, VIOLET, (int(q[0]), int(q[1])), int(15 - 7 * pulse), 1)
-		if ops.get('corrupt'):
-			for k in range(3):
-				a = t * 2.2 + k * 2.1
-				_dot(s, q[0] + math.cos(a) * (6 + 10 * pulse), q[1] + math.sin(a) * (6 + 10 * pulse),
-				     2.6, VIOLET, 0.95)
-		if ops.get('recursion'):
-			f2 = (t * 1.6 + i * 0.4) % 1.0
-			_dot(s, q[0] + math.cos(f2 * 5.0) * 18 * f2, q[1] - 16 * f2, 2.6, (180, 255, 200), 1 - f2)
-		if ops.get('drain') and i == 0:
-			f2 = (t * 0.9) % 1.0
+		bl = ops.get('blast', 0)
+		if bl:
+			for k in range(min(3, bl)):
+				rr = (8 + 7 * bl) * (0.4 + 0.6 * ((pulse + k * 0.3) % 1.0))
+				pygame.draw.circle(s, shade(ORANGE, 0.9 - 0.5 * pulse), (int(q[0]), int(q[1])), int(rr), 2)
+		spl = ops.get('split', 0)
+		if spl:
+			for k in range(1 + spl):
+				a = t * 3 + k * (TAU / (1 + spl))
+				d = 9 + 3 * spl
+				_dot(s, q[0] + math.cos(a) * d, q[1] + math.sin(a) * d, 2.0 + 0.2 * spl, col, 0.9)
+		fr = ops.get('frost', 0)
+		if fr:
+			rr = 7 + 2 * fr
+			pygame.draw.circle(s, (120, 210, 255), (int(q[0]), int(q[1])), rr, 1)
+			for k in range(2 + fr):
+				a = k * TAU / (2 + fr) + t * 0.4
+				pygame.draw.line(s, (120, 210, 255), (q[0] + math.cos(a) * rr * 0.55,
+				                 q[1] + math.sin(a) * rr * 0.55),
+				                 (q[0] + math.cos(a) * rr * 1.25, q[1] + math.sin(a) * rr * 1.25), 1)
+		bn = ops.get('burn', 0)
+		if bn:
+			for k in range(1 + bn):
+				h = 10 + 4 * bn
+				_dot(s, q[0] + math.sin(t * 6 + k * 2.2) * (3 + bn), q[1] - 6 - ((t * 22 + k * 9) % h),
+				     1.6 + 0.25 * bn, mix((255, 210, 90), (255, 90, 30), ((t * 1.4 + k * 0.3) % 1.0)), 0.95)
+		vd = ops.get('void', 0)
+		if vd:
+			rr = 10 + 3 * vd
+			pygame.draw.circle(s, VIOLET, (int(q[0]), int(q[1])), int(rr - rr * 0.45 * pulse), 1)
+			for k in range(2 + vd):
+				a = k * TAU / (2 + vd) + t * 0.7
+				d0 = rr * (1.5 - 0.5 * pulse)
+				pygame.draw.line(s, shade(VIOLET, 0.8), (q[0] + math.cos(a) * d0, q[1] + math.sin(a) * d0),
+				                 (q[0] + math.cos(a) * rr * 0.6, q[1] + math.sin(a) * rr * 0.6), 1)
+		cr = ops.get('corrupt', 0)
+		if cr:
+			for k in range(1 + 2 * cr):
+				a = t * 2.2 + k * (TAU / (1 + 2 * cr))
+				_dot(s, q[0] + math.cos(a) * (5 + (7 + 2 * cr) * pulse),
+				     q[1] + math.sin(a) * (5 + (7 + 2 * cr) * pulse), 2.2 + 0.2 * cr, VIOLET, 0.95)
+		rc = ops.get('recursion', 0)
+		if rc:
+			for k in range(rc):
+				f2 = (t * 1.6 + i * 0.4 + k * 0.33) % 1.0
+				_dot(s, q[0] + math.cos(f2 * 5.0 + k) * (12 + 4 * rc) * f2, q[1] - (12 + 3 * rc) * f2,
+				     2.2 + 0.2 * rc, (180, 255, 200), 1 - f2)
+		dr = ops.get('drain', 0)
+		if dr and i < min(3, dr):
+			f2 = (t * 0.9 + i * 0.3) % 1.0
 			_dot(s, q[0] + (ax - q[0]) * f2, q[1] + (ay - q[1]) * f2 - math.sin(f2 * math.pi) * 14,
-			     3.0, HP_COL, 1.0)
-		if ops.get('shock') and i + 1 < len(hitpos):
-			n2 = hitpos[i + 1]
-			pygame.draw.line(s, (150, 220, 255), (q[0], q[1]), (n2[0], n2[1]), 1)
-	if ops.get('chain') and emit != 'arc':
-		for i in range(min(len(hitpos) - 1, ops['chain'])):
-			pygame.draw.line(s, WHITE, (hitpos[i][0], hitpos[i][1]),
-			                 (hitpos[i + 1][0], hitpos[i + 1][1]), 1)
-	if ops.get('crit') and hitpos:
+			     2.4 + 0.3 * dr, HP_COL, 1.0)
+		sh = ops.get('shock', 0)
+		if sh:
+			for k in range(1 + sh):
+				a = t * 9 + k * (TAU / (1 + sh))
+				d = 8 + 2 * sh
+				pygame.draw.line(s, (200, 230, 255), (q[0], q[1]),
+				                 (q[0] + math.cos(a) * d, q[1] + math.sin(a) * d), 1)
+	ch = ops.get('chain', 0)
+	if ch and emit != 'arc' and hitpos:
+		# an arc jumps to targets the shot never touched -- that is the whole point
+		cur = hitpos[0]
+		reached = [q for q in hitpos]
+		for k in range(ch):
+			rest = [q for q in foes if q not in reached]
+			if not rest: break
+			nxt = min(rest, key=lambda z: (z[0] - cur[0]) ** 2 + (z[1] - cur[1]) ** 2)
+			mid = ((cur[0] + nxt[0]) * 0.5 + math.sin(t * 11 + k) * 6,
+			       (cur[1] + nxt[1]) * 0.5 - 7)
+			pygame.draw.lines(s, (170, 220, 255), False,
+			                  [(cur[0], cur[1]), mid, (nxt[0], nxt[1])], 2)
+			pygame.draw.lines(s, WHITE, False, [(cur[0], cur[1]), mid, (nxt[0], nxt[1])], 1)
+			nxt[2] = True
+			reached.append(nxt)
+			cur = nxt
+	crk = ops.get('crit', 0)
+	if crk and hitpos:
 		q = hitpos[0]
-		g = text('CRIT', 11, GOLD, True)
+		mult = st['crit_m'] if st else (2.0 + 0.25 * crk)
+		g = text('x%.1f' % mult, 10 + min(4, crk), GOLD, True)
 		g.set_alpha(int(120 + 135 * pulse))
-		s.blit(g, (q[0] + 8, q[1] - 20))
-	if ops.get('echo'):
-		g = text('x2', 12, shade(col, 0.5 + 0.5 * pulse), True)
+		s.blit(g, (q[0] + 8, q[1] - 22))
+	eo = ops.get('echo', 0)
+	if eo:
+		# the volley repeats: show the ghost of it, one trail per rank
+		for k in range(eo):
+			f2 = ((t * 0.9 - 0.13 * (k + 1)) % 1.0)
+			for q in hitpos[:2]:
+				gx = ax + (q[0] - ax) * f2; gy = ay + (q[1] - ay) * f2
+				_dot(s, gx, gy, 2.4, shade(col, 0.45), 0.5)
+		g = text('x%d' % (1 + eo), 12, shade(col, 0.5 + 0.5 * pulse), True)
 		s.blit(g, (x + 8, y + h_ - 20))
-	if ops.get('overclock'):
-		bw = int(w_ * 0.3)
-		pygame.draw.rect(s, (30, 20, 20), (x + w_ - bw - 8, y + h_ - 12, bw, 5), 0, 2)
-		pygame.draw.rect(s, RED, (x + w_ - bw - 8, y + h_ - 12, int(bw * pulse), 5), 0, 2)
+	fb = ops.get('feedback', 0)
+	if fb and hitpos:
+		# every kill shortens the cooldown: the meter by the agent fills faster
+		g = ring(int(13 + 2 * fb), GREEN, 2, 150)
+		s.blit(g, (ax - g.get_width() * 0.5, ay - g.get_height() * 0.5), None, pygame.BLEND_ADD)
+		aa = -math.pi * 0.5 + TAU * ((t * (0.7 + 0.35 * fb)) % 1.0)
+		pygame.draw.line(s, GREEN, (ax, ay), (ax + math.cos(aa) * (13 + 2 * fb),
+		                                      ay + math.sin(aa) * (13 + 2 * fb)), 2)
+	oc = ops.get('overclock', 0)
+	if oc:
+		bw = int(w_ * (0.13 + 0.045 * oc))     # a hotter process runs a longer gauge
+		bh = 4 + oc
+		pygame.draw.rect(s, (30, 20, 20), (x + w_ - bw - 8, y + h_ - 8 - bh, bw, bh), 0, 2)
+		pygame.draw.rect(s, mix(ORANGE, RED, min(1.0, 0.2 * oc)),
+		                 (x + w_ - bw - 8, y + h_ - 8 - bh, int(bw * (0.35 + 0.65 * pulse)), bh), 0, 2)
 
 	for q in foes:
 		_foe(s, q[0], q[1], (150, 160, 190), 7, q[2])
 		if q[2]: blit_glow(s, q[0], q[1], 11, col, 0.5)
 	_agent(s, ax, ay, t, shape, pcol)
+	if focus and focus in O:
+		# the op under comparison, named and ranked, so the two panels can never
+		# look the same when they are not the same
+		d = O[focus]
+		lbl = '%s %s %s' % (d['glyph'], d['name'], rk(ops.get(focus, 0)) or '-')
+		g = text(lbl, 11, d['col'] or col, True)
+		bx = x + 8; by = y + h_ - 19
+		pygame.draw.rect(s, (10, 13, 20), (bx - 4, by - 2, g.get_width() + 8, 17), 0, 4)
+		pygame.draw.rect(s, shade(d['col'] or col, 0.7), (bx - 4, by - 2, g.get_width() + 8, 17), 1, 4)
+		s.blit(g, (bx, by))
 	s.set_clip(old)
 
 
@@ -1133,7 +1239,7 @@ class LevelUp:
 		if pv.get('mode') in ('ab', 'solo', 'fuse'):
 			_weapon_scene(s, art, pv.get('emit'), col, self.t, _rk_map(pv.get('after')),
 			              pv['ghost'].stats(self.w.player) if pv.get('ghost') else None,
-			              self.w.player.shape, self.w.player.col)
+			              self.w.player.shape, self.w.player.col, pv.get('focus'))
 		else:
 			art_key = o.key.split(':', 1)[1] if ':' in o.key else o.key
 			draw_art(s, art, o.kind, art_key, col, self.t)
@@ -1286,9 +1392,9 @@ def draw_preview(s, rect, w, o, t):
 		ra = (x + 14, top, half, bh)
 		rb = (x + 14 + half + 34, top, half, bh)
 		_weapon_scene(s, ra, pv['emit'], shade(col, 0.75), t, _rk_map(pv['before']),
-		              o.proc.stats(pl) if o.proc else None, shape, pcol)
+		              o.proc.stats(pl) if o.proc else None, shape, pcol, pv.get('focus'))
 		_weapon_scene(s, rb, pv['emit'], col, t, _rk_map(pv['after']),
-		              pv['ghost'].stats(pl), shape, pcol)
+		              pv['ghost'].stats(pl), shape, pcol, pv.get('focus'))
 		_arrow(s, ra[0] + half + 6, top + bh * 0.5, rb[0] - 6, top + bh * 0.5, GOLD, 3, 9)
 		draw_text(s, trim(pv.get('name_a', 'now'), int(half / 6.2)), ra[0] + 8, top + 4, 11, INK_FAINT, True)
 		draw_text(s, trim(pv.get('name_b', 'after'), int(half / 6.2)), rb[0] + 8, top + 4, 11,
