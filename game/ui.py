@@ -1507,15 +1507,27 @@ def draw_pause(w, s, tab=0):
 	LW = int(W * 0.50)
 	x = 40; y = 96
 	panel(s, (x - 12, y - 12, LW, H - y - 40), 170)
+	tot = w.arsenal.total_power(pl)
 	draw_text(s, 'ACTIVE PROCESSES  %d/%d' % (len(w.arsenal.procs), w.arsenal.slots),
 	          x, y, 14, INK, True)
+	draw_text(s, '%d est. dps' % tot, x + LW - 36, y - 2, 15, GOLD, True, 'tr')
 	y += 26
 	for pr in w.arsenal.procs:
 		c = pr.stats(pl)
+		dps = pr.power(pl)
 		glyph_box(s, x, y, 34, E[pr.emit]['glyph'], pr.col, (18, 22, 34))
 		draw_text(s, pr.name, x + 44, y, 15, GOLD if pr.evo else INK, True)
 		draw_text(s, 'rank %d   %.0f dmg x%d   %.2fs' % (pr.rank, c['dmg'], c['count'], c['cd']),
 		          x + 44, y + 19, 11, INK_DIM)
+		# which weapon is actually carrying the run, and by how much
+		draw_text(s, '%d dps' % dps, x + LW - 36, y + 1, 15, GOLD if pr.evo else INK, True, 'tr')
+		share = dps / tot if tot > 0 else 0.0
+		draw_text(s, '%d%% of your damage' % round(share * 100),
+		          x + LW - 36, y + 21, 10, INK_FAINT, False, 'tr')
+		bar(s, x + LW - 116, y + 34, 80, 3, share, shade(pr.col, 0.9), (28, 32, 44), 2)
+		hp = pr.sustain(pl)
+		if hp > 0.01:
+			draw_text(s, '+%.1f hp/s' % hp, x + LW - 130, y + 1, 12, HP_COL, True, 'tr')
 		ox = x + 44; oy = y + 34
 		for k, v in sorted(pr.ops.items(), key=lambda kv: -kv[1]):
 			d = O[k]
@@ -1570,7 +1582,7 @@ def draw_pause(w, s, tab=0):
 	draw_text(s, 'RUN', x, y, 14, INK, True); y += 22
 	d = w.director
 	rows = [('schedule', w.pace['name']), ('time', d.time_str()), ('kills', str(w.stats['kills'])),
-	        ('dps', '%d' % w.dps),
+	        ('dps, measured', '%d' % w.dps),
 	        ('damage dealt', '%d' % w.stats['dmg']), ('damage taken', '%d' % w.stats['taken']),
 	        ('evolutions', str(w.stats['evos'])), ('fusions', str(w.stats['fuses'])),
 	        ('biome', w.level['name'])]

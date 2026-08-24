@@ -76,6 +76,32 @@ def apply_corrupt(w, e, rank, power=1.0):
 
 
 # ------------------------------------------------------------------ damage
+EXPLODE_SCALE = True    # turned off only by tools/, to price the fireworks
+
+
+def apply_status(w, e, proc, dmg):
+	"""The element ops, applied from a path that never built a projectile.
+
+	explode() and chain_arc() reach enemies directly, so the on-hit block in
+	projectiles._apply never runs for mines, rain, novas-by-blast or arcs. Every
+	emitter whose affinity list mentions an element has to honour it."""
+	if proc is None: return
+	ops = proc.ops
+	syn = proc.syn
+	bn = ops.get('burn', 0)
+	if bn:
+		apply_burn(w, e, (2.6 + 2.2 * bn) * w.player.dmg_mult * (1.5 if 'WILDFIRE' in syn else 1.0),
+		           2.2 + 0.5 * bn, bn)
+		if 'LEECH' in syn: e.burn_leech = True
+	fr = ops.get('frost', 0)
+	if fr: apply_frost(w, e, 0.16 + 0.09 * fr, 1.6 + 0.35 * fr)
+	sh = ops.get('shock', 0)
+	if sh and w.rng.random() < 0.10 + 0.06 * sh:
+		apply_shock(w, e, 0.35 + 0.13 * sh)
+	cr = ops.get('corrupt', 0)
+	if cr: apply_corrupt(w, e, cr, 2.0 if 'CONTAGION' in syn else 1.0)
+
+
 def damage_enemy(w, e, dmg, col=None, proc=None, crit=False, knock=0.0, kx=0.0, ky=0.0,
                  silent=False, is_dot=False, lifesteal_ok=True):
 	if e.dead or dmg <= 0.0: return 0.0
@@ -176,11 +202,17 @@ def _corrupt_burst(w, e):
 
 
 def explode(w, x, y, radius, dmg, col=ORANGE, proc=None, knock=180.0, shake=0.10,
-            source=None, crit=False, shatter=True):
+            source=None, crit=False, shatter=True, status=False):
 	fx = w.fx
+	# The ring is the readable part -- it IS the blast radius -- so it always draws,
+	# and fx.wave decides for itself whether the screen still has room for it. The
+	# sparks and the smoke are the ones there are hundreds of: those get cut.
+	busy = len(fx.waves) if EXPLODE_SCALE else 0
 	fx.wave(x, y, radius * 0.22, radius, 0.34, col, max(3, int(radius * 0.09)))
-	fx.burst(x, y, int(6 + radius * 0.12), col, radius * 3.0, 0.38, 3.4)
-	fx.smoke(x, y, int(2 + radius * 0.035), shade(col, 0.55), 60, 0.7, radius * 0.24)
+	q = fx.quality * (1.0 if busy < 18 else 0.45)
+	fx.burst(x, y, int((6 + radius * 0.12) * q), col, radius * 3.0, 0.38, 3.4)
+	if q > 0.6:
+		fx.smoke(x, y, int(2 + radius * 0.035), shade(col, 0.55), 60, 0.7, radius * 0.24)
 	if shake: fx.shake(shake)
 	w.audio.play('explode', min(0.85, 0.28 + radius / 420.0), 0.045)
 
@@ -198,6 +230,7 @@ def explode(w, x, y, radius, dmg, col=ORANGE, proc=None, knock=180.0, shake=0.10
 			dd *= (1.0 + frost_bonus)
 			fx.burst(e.x, e.y, 5, (170, 230, 255), 200, 0.35, 2.6)
 		damage_enemy(w, e, dd, col, proc, crit, knock, dx / d, dy / d)
+		if status: apply_status(w, e, proc, dd)
 
 
 def chain_arc(w, x0, y0, target, dmg, col, proc, jumps, radius=210.0, seen=None, falloff=0.86):
@@ -213,7 +246,7 @@ def chain_arc(w, x0, y0, target, dmg, col, proc, jumps, radius=210.0, seen=None,
 		seen.add(cur.uid)
 		w.fx_arc(cx, cy, cur.x, cur.y, col)
 		damage_enemy(w, cur, d, col, proc, False, 90.0, *norm(cur.x - cx, cur.y - cy))
-		if burn: apply_burn(w, cur, (2.0 + 1.6 * burn) * w.player.dmg_mult, 2.0 + 0.4 * burn, burn)
+		apply_status(w, cur, proc, d)
 		if blast:
 			explode(w, cur.x, cur.y, 42 + 12 * blast, d * (0.32 + 0.09 * blast), col, proc,
 			        120.0, 0.03, cur)

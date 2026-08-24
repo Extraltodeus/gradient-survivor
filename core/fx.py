@@ -1,5 +1,8 @@
 """Particles, damage numbers, shockwaves, screenshake, hitstop, flashes."""
 
+WAVE_SOFT = 26     # past this, small rings start being dropped
+WAVE_CAP  = 44     # hard ceiling: a ring is a full-screen circle each
+
 import math, random
 import pygame
 from core.settings import *
@@ -94,6 +97,20 @@ class FX:
 		self.part('dot', x, y, 0.0, 0.0, life, size, col, 0.0, glowp=0.8)
 
 	def wave(self, x, y, r0, r1, life, col, width=3, follow=None):
+		"""Expanding ring. Hard-capped: every explosion asks for one, and late game
+		asks for dozens a second -- past the cap they stack into an unreadable mess
+		that costs a full-screen circle each, so the small ones are simply dropped."""
+		n = len(self.waves)
+		if n >= WAVE_CAP:
+			if follow is None and r1 < 200.0: return
+			# a big or attached ring matters: make room by dropping the oldest small one
+			for i, q in enumerate(self.waves):
+				if q.follow is None and q.r1 < 200.0:
+					del self.waves[i]; break
+			else:
+				return
+		elif n >= WAVE_SOFT and r1 < 120.0 and self.rng.random() > self.quality * 0.5:
+			return
 		w = Wave()
 		w.x = x; w.y = y; w.r = r0; w.r0 = r0; w.r1 = r1
 		w.life = w.max = life; w.col = col; w.width = width; w.follow = follow

@@ -32,7 +32,7 @@ class Proj:
 	__slots__ = ('kind', 'x', 'y', 'px', 'py', 'vx', 'vy', 'r', 'dr', 'dmg', 'col', 'ttl', 'life0',
 	             'pierce', 'bounce', 'hits', 'proc', 'ops', 'gen', 'dead', 'angle', 'spin',
 	             'a0', 'a1', 'f0', 'f1', 'f2', 'ref', 'flags', 'crit_c', 'crit_m', 'dist',
-	             'follow', 'split_used', 'owner', 'tint2', 'trail_t', 'seed')
+	             'follow', 'split_used', 'owner', 'tint2', 'trail_t', 'seed', 'impact_t')
 
 	def __init__(self): self.dead = True
 
@@ -48,6 +48,7 @@ def new_proj(w, kind, x, y, vx, vy, dmg, col, proc, r=6.0, ttl=2.0, gen=0, **kw)
 		if not killed: return None
 	p = w.proj_pool.pop() if w.proj_pool else Proj()
 	p.kind = kind; p.x = x; p.y = y; p.px = x; p.py = y
+	p.impact_t = 0.0
 	p.vx = vx; p.vy = vy; p.dmg = dmg; p.col = col
 	p.r = r; p.dr = kw.get('dr', r)
 	p.ttl = ttl; p.life0 = ttl
@@ -232,17 +233,34 @@ def _upd_mine(w, p, dt):
 
 
 def _detonate_mine(w, p):
+	"""A mine never touches _hit, so every op it advertises has to be spent here."""
 	if p.dead: return
 	p.dead = True
-	rad = p.f1
 	ops = p.ops
+	syn = _syn(p)
+	bl = ops.get('blast', 0)
+	rad = p.f1 * (1.0 + 0.16 * bl)
+	dmg = p.dmg * (1.0 + (0.42 + 0.14 * bl if bl else 0.0))
 	vd = ops.get('void', 0)
 	if vd: _void_pull(w, p.x, p.y, rad * 1.45, vd)
-	explode(w, p.x, p.y, rad, p.dmg, p.col, p.proc, 260.0, 0.14)
+	explode(w, p.x, p.y, rad, dmg, p.col, p.proc, 260.0, 0.14, status=True)
+	sp = ops.get('split', 0)
+	if sp and p.gen < MAX_GEN and len(w.projs) < MAX_PROJ * 0.82:
+		_do_split(w, p, sp, syn)
+	ch = ops.get('chain', 0)
+	if ch and p.gen < MAX_GEN:
+		from game.combat import chain_arc, nearest_n
+		tg = nearest_n(w, p.x, p.y, 1, 190.0 + 22.0 * ch, set())
+		if tg:
+			chain_arc(w, p.x, p.y, tg[0], p.dmg * (0.45 + 0.08 * ch),
+			          p.tint2 or (170, 220, 255), p.proc, ch - 1, 190.0 + 22.0 * ch)
 	_post_hit_extras(w, p, None)
 
 
 def _upd_blade(w, p, dt, player):
+	# PIERCE and BOUNCE are consumed in _hit, which a blade never reaches: it
+	# re-hits on a cooldown instead. So they buy what they would have bought --
+	# more contacts, and a longer outward arc.
 	p.f0 -= dt
 	if p.f0 > 0.0:
 		p.vx *= (1.0 - 1.55 * dt); p.vy *= (1.0 - 1.55 * dt)
@@ -259,7 +277,7 @@ def _upd_blade(w, p, dt, player):
 			return
 	p.x += p.vx * dt; p.y += p.vy * dt
 	p.angle += p.spin * dt
-	_collide_persist(w, p, 0.34)
+	_collide_persist(w, p, 0.34 / (1.0 + 0.34 * p.ops.get('pierce', 0)))
 
 
 def _upd_turret(w, p, dt):
@@ -355,6 +373,26 @@ def _apply(w, p, e, dmg, nx, ny, knock=140.0, spawn_fx=True):
 					apply_shock(w, o, 0.2)
 	cr = ops.get('corrupt', 0)
 	if cr: apply_corrupt(w, e, cr, 2.0 if 'CONTAGION' in syn else 1.0)
+
+	# BLAST, VOID and CHAIN live in _hit, which orbs, fields, waves, beams and
+	# blades never reach -- so an ATTENTION RING could carry BLAST III and feel
+	# nothing, while SINGULARITY RING asked for exactly that. They act here too,
+	# on a per-shape cooldown, because a field ticking over twenty bodies must
+	# not become twenty explosions.
+	if p.kind != 'shot' and w.t >= p.impact_t:
+		bl = ops.get('blast', 0); vd = ops.get('void', 0); ch = ops.get('chain', 0)
+		if bl or vd or ch:
+			p.impact_t = w.t + 0.26
+			if vd: _void_pull(w, e.x, e.y, 62.0 + 20.0 * vd, vd)
+			if bl:
+				explode(w, e.x, e.y, (30.0 + 11.0 * bl) * w.player.area_mult,
+				        dmg * (0.35 + 0.12 * bl), p.tint2 or p.col, proc, 170.0, 0.03, e)
+			if ch and p.gen < MAX_GEN:
+				seen = {e.uid}
+				tg = nearest_n(w, e.x, e.y, 1, 170.0 + 22.0 * ch, seen)
+				if tg:
+					chain_arc(w, e.x, e.y, tg[0], dmg * (0.40 + 0.07 * ch),
+					          p.tint2 or (170, 220, 255), proc, ch - 1, 170.0 + 22.0 * ch, seen)
 	if crit:
 		w.fx.burst(e.x, e.y, 7, GOLD, 260, 0.4, 3.0)
 		w.fx.shake(0.045)

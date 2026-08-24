@@ -82,7 +82,10 @@ does). Ops stack, interact, and rename the thing they are attached to.
   blades, spirals, rain.
 - **22 ops** — pierce, blast, split, chain, homing, bounce, spin, multishot,
   recursion, echo, giant, swift, crit, momentum, overclock, feedback, ignite,
-  quantize, shock, corrupt, void, drain.
+  quantize, shock, corrupt, void, drain. Every one of them does something on
+  every emitter that advertises it, which was not always true: the impact ops
+  used to live on a code path only plain projectiles ever reached, so an
+  ATTENTION RING could carry BLAST III and feel nothing at all.
 - **16 synergies** — declared combinations the projectile pipeline actually
   reads. `pierce 2 + blast 2` detonates on *every* perforation; `frost 2 +
   blast 2` shatters chilled targets; `split 2 + recursion 2` makes shards that
@@ -224,6 +227,16 @@ carries its own description. **START RUN** drops you back into the fight with
 whatever you just built.
 
 ![The bench](docs/bench.png)
+
+Pausing mid-run (`ESC`) tells you the same thing about the build you actually
+have: every process lists its estimated dps, what share of your damage it is
+carrying, and how much integrity it hands back if it drains. The estimate is a
+model of the projectile pipeline — pierce saturating, chain falling off, split
+going geometric once FRACTAL lands — with every coefficient fitted against
+measured damage from `tools/`, not guessed. Median error against the simulation
+is about 1%; two extreme op stacks on area emitters are off by ~3x.
+
+![The pause screen](docs/pause.png)
 
 ---
 

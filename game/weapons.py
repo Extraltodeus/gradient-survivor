@@ -25,67 +25,67 @@ def _em(k, **kw):
 _em('bolt', name='INFERENCE BOLT', glyph='>', col=CYAN, tier=0,
     desc='A fast bolt seeks the nearest threat.',
     dmg=16.0, cd=0.62, count=1, speed=640.0, size=5.0, ttl=1.5, pierce=0,
-    affinity=('pierce', 'crit', 'momentum', 'split'))
+    crowd=1.00, affinity=('pierce', 'crit', 'momentum', 'split'))
 
 _em('swarm', name='TOKEN SWARM', glyph='~', col=(120, 255, 210), tier=0,
     desc='Three slow tokens drift toward whatever they can find.',
     dmg=7.0, cd=0.95, count=3, speed=300.0, size=4.0, ttl=2.4, pierce=0, homing=1,
-    affinity=('homing', 'multishot', 'recursion', 'corrupt'))
+    crowd=1.00, affinity=('homing', 'multishot', 'recursion', 'corrupt'))
 
 _em('orbit', name='ATTENTION RING', glyph='O', col=(150, 190, 255), tier=0,
     desc='Weights orbit the agent, grinding anything they touch.',
     dmg=12.0, cd=2.00, count=2, speed=2.3, size=9.0, ttl=2.06, orbit_r=78.0,
-    affinity=('giant', 'frost', 'blast', 'void'))
+    crowd=11.30, affinity=('giant', 'frost', 'blast', 'void'))
 
 _em('aura', name='LOSS FIELD', glyph='@', col=(255, 120, 190), tier=0,
     desc='A field of descending loss burns everything nearby.',
     dmg=8.0, cd=3.00, count=1, speed=0.0, size=96.0, ttl=3.06, tick=0.52,
-    affinity=('burn', 'drain', 'void', 'giant'))
+    crowd=52.80, affinity=('burn', 'drain', 'void', 'giant'))
 
 _em('nova', name='SOFTMAX NOVA', glyph='(', col=(255, 200, 90), tier=1,
     desc='A normalising shockwave erupts outward.',
     dmg=17.0, cd=2.60, count=1, speed=0.0, size=190.0, ttl=0.55,
-    affinity=('blast', 'void', 'frost', 'giant'))
+    crowd=25.00, affinity=('blast', 'void', 'frost', 'giant'))
 
 _em('beam', name='BACKPROP BEAM', glyph='|', col=(255, 90, 120), tier=1,
     desc='A rotating gradient beam sweeps the field.',
     dmg=5.4, cd=2.50, count=1, speed=1.15, size=7.0, ttl=2.56, length=250.0,
-    affinity=('chain', 'burn', 'overclock', 'giant'))
+    crowd=46.00, affinity=('chain', 'burn', 'overclock', 'giant'))
 
 _em('mine', name='DROPOUT MINE', glyph='x', col=(255, 150, 60), tier=1,
     desc='Drops unstable nodes that detonate on contact.',
     dmg=26.0, cd=1.70, count=1, speed=150.0, size=11.0, ttl=7.0, blast_r=76.0,
-    affinity=('blast', 'split', 'void', 'burn'))
+    crowd=4.60, affinity=('blast', 'split', 'void', 'burn'))
 
 _em('arc', name='CHAIN LOGIT', glyph='z', col=(190, 220, 255), tier=1,
     desc='A near-continuous stutter of lightning that hops between activations.',
     dmg=4.4, cd=0.40, count=1, speed=0.0, size=0.0, ttl=0.1, jumps=2,
-    affinity=('chain', 'shock', 'frost', 'crit'))
+    crowd=2.58, affinity=('chain', 'shock', 'frost', 'crit'))
 
 _em('flame', name='FLASH ATTENTION', glyph='f', col=(255, 118, 38), tier=1,
     desc='A sustained cone of fire poured out in front of you. Short range, no gaps.',
     dmg=2.9, cd=0.13, count=4, speed=440.0, size=7.0, ttl=0.40, pierce=3, cone=0.52,
-    affinity=('burn', 'giant', 'multishot', 'void'))
+    crowd=2.00, affinity=('burn', 'giant', 'multishot', 'void'))
 
 _em('turret', name='SENTINEL NODE', glyph='T', col=(140, 255, 140), tier=2,
     desc='Deploys an autonomous node that fires on its own.',
     dmg=8.0, cd=4.20, count=1, speed=0.0, size=5.0, ttl=8.0, rate=0.44,
-    affinity=('multishot', 'swift', 'crit', 'homing'))
+    crowd=15.40, affinity=('multishot', 'swift', 'crit', 'homing'))
 
 _em('blade', name='RECURSION BLADE', glyph='%', col=(255, 240, 120), tier=2,
     desc='A blade thrown outward that returns through everything.',
     dmg=19.0, cd=1.60, count=1, speed=520.0, size=13.0, ttl=3.2, pierce=2,
-    affinity=('pierce', 'bounce', 'giant', 'crit'))
+    crowd=6.13, affinity=('pierce', 'bounce', 'giant', 'crit'))
 
 _em('spiral', name='DIFFUSION SPIRAL', glyph='6', col=(200, 150, 255), tier=2,
     desc='Noise unrolls outward in a widening spiral.',
     dmg=8.5, cd=1.30, count=4, speed=270.0, size=5.0, ttl=2.2,
-    affinity=('orbitize', 'split', 'multishot', 'corrupt'))
+    crowd=1.00, affinity=('orbitize', 'split', 'multishot', 'corrupt'))
 
 _em('rain', name='STOCHASTIC RAIN', glyph='v', col=(120, 200, 255), tier=2,
     desc='Samples the field and strikes at random hot spots.',
     dmg=22.0, cd=1.80, count=2, speed=0.0, size=46.0, ttl=0.45,
-    affinity=('blast', 'burn', 'multishot', 'frost'))
+    crowd=1.73, affinity=('blast', 'burn', 'multishot', 'frost'))
 
 EMIT_ORDER = list(E.keys())
 STARTERS = ('bolt', 'swarm', 'orbit', 'aura')
@@ -443,10 +443,88 @@ class Process:
 		return c
 
 	def power(self, pl):
-		"""Rough DPS estimate, used for UI bars only."""
+		"""Estimated effective damage per second against a crowd.
+
+		This has to model the projectile pipeline, not just the stat block: most
+		of the interesting ops -- pierce, chain, split, ignite, corrupt -- carry no
+		stat modifier at all, so an estimate built from the stat block alone shows
+		the same number before and after taking one, which is exactly backwards on
+		a card whose whole job is to say what changes.
+
+		Every coefficient here was fitted against measured damage-per-second from
+		tools/dpsfit.py: 24 enemies held alive in a 230px ring for 18 seconds, one
+		emitter at a time, each op swept at rank 1/3/5. It is an estimate, not a
+		promise -- but it is an estimate that was checked.
+		"""
 		c = self.stats(pl)
-		mult = 1.0 + 0.5 * len(self.ops) + 0.9 * len(self.syn) + (2.0 if self.evo else 0.0)
-		return c['dmg'] * c['count'] / max(0.08, c['cd']) * mult
+		o = self.ops
+		syn = self.syn
+		cd = max(0.08, c['cd'])
+
+		# ---- what one projectile is worth, in multiples of its own damage
+		hit = 1.0
+		p = o.get('pierce', 0) + (2 if 'JUGGERNAUT' in syn else 0)
+		if p: hit += 3.2 * p / (p + 2.0)                 # saturates: bodies run out
+		hit += 1.02 * o.get('bounce', 0)
+		ch = o.get('chain', 0)
+		if ch: hit += (0.45 + 0.08 * ch) * ch * 0.9      # the arc, with its falloff
+		bl = o.get('blast', 0)
+		if bl: hit += (0.28 * bl + 0.24 * bl * bl) * (1.45 if 'IMPLOSION' in syn else 1.0)
+		sp = o.get('split', 0)
+		if sp:
+			k = (1 + sp) * ((0.78 if 'HYDRA' in syn else 0.46) + 0.05 * sp)
+			# FRACTAL lets shards split again: the payload stops being linear
+			hit += k * (1.0 + k * (1.0 + 0.55 * k)) if ('FRACTAL' in syn or 'HYDRA' in syn) else k
+		hit *= 1.0 + c['crit_c'] * (c['crit_m'] - 1.0)
+
+		# How many bodies one cast of THIS emitter touches, measured. A field that
+		# ticks for three seconds and a single bolt cannot share a formula.
+		# The two do not multiply: an emitter whose crowd factor is already 50 is
+		# hitting everything in range, so PIERCE has almost nothing left to add.
+		# Only the raw single-target emitters get the op bonus at full value.
+		crowd = E[self.emit].get('crowd', 1.0)
+		extra = (hit - 1.0) / (1.0 + 1.0 * (crowd - 1.0))
+		reach = crowd * (1.0 + extra)
+		dps = c['dmg'] * c['count'] * reach / cd
+
+		# ---- damage that is its own source, not a multiple of the weapon's
+		bn = o.get('burn', 0)
+		if bn:
+			lit = min(6.0, 0.55 + 0.28 * (2.2 + 0.5 * bn) * (1.0 + 0.6 * (reach - 1.0)))
+			dps += (2.6 + 2.2 * bn) * pl.dmg_mult * (1.5 if 'WILDFIRE' in syn else 1.0) * lit
+		cr = o.get('corrupt', 0)
+		if cr:
+			dps += (4.0 + 3.0 * cr) * (2 + cr) * pl.dmg_mult * 0.20 \
+			       * (2.0 if 'CONTAGION' in syn else 1.0) * min(3.0, reach ** 0.5)
+
+		# ---- multipliers on the whole output
+		eo = o.get('echo', 0)
+		if eo: dps *= 1.42 + 0.005 * eo
+		rc = o.get('recursion', 0)
+		if rc: dps *= 1.0 + (0.16 + 0.11 * rc) * 0.35    # needs kills, so: modest
+		fb = o.get('feedback', 0)
+		if fb: dps *= 1.0 + min(0.20, (0.05 + 0.035 * fb) / cd * 0.2)
+		oc = o.get('overclock', 0)
+		if oc: dps *= 1.0 + 0.32 * (3.0 + 2.0 * oc) * (0.055 + 0.012 * oc)
+		fr = o.get('frost', 0)
+		if fr:
+			dps *= 1.0 + 0.03 * fr
+			if 'SHATTER' in syn: dps *= 1.0 + 0.35 * (0.55 + 0.25 * fr)
+		# these four do not deal damage; they stop shots being wasted
+		if o.get('void'): dps *= 1.0 + 0.010 * o['void']
+		if o.get('shock'): dps *= 1.0 + 0.012 * o['shock']
+		if o.get('homing'): dps *= 1.0 + 0.020 * o['homing']
+		if o.get('orbitize'): dps *= 1.0 + 0.020 * o['orbitize']
+		if self.evo: dps *= 1.25
+		return dps
+
+	def sustain(self, pl):
+		"""Integrity per second this process gives back through DRAIN."""
+		dr = self.ops.get('drain', 0)
+		if not dr: return 0.0
+		c = self.stats(pl)
+		hits = c['count'] / max(0.08, c['cd']) * E[self.emit].get('crowd', 1.0)
+		return (0.10 + 0.045 * dr) * (0.5 + 0.55 * dr) * min(hits, 20.0)
 
 
 def fuse_plan(a, b):
@@ -494,7 +572,12 @@ def fire(w, pr, mult=1.0, echo=False):
 	if f: f(w, pr, c, mult)
 	pr.flash = 1.0
 	if pr.heat_max > 0.0 and not echo:
-		pr.heat = min(pr.heat_max, pr.heat + (2.0 if 'RUNAWAY' in pr.syn else 1.0))
+		# heat was +1 per shot against a decay of 1.5/s, so OVERCLOCK simply did not
+		# exist on anything slower than about one shot a second -- which is every
+		# emitter LIGHTNING ORACLE and its neighbours are built on. Gain now pays
+		# for the wait instead of punishing it.
+		gain = 1.0 + 1.6 * c['cd']
+		pr.heat = min(pr.heat_max, pr.heat + gain * (2.0 if 'RUNAWAY' in pr.syn else 1.0))
 	if not echo:
 		eo = pr.ops.get('echo', 0)
 		if eo:
@@ -615,7 +698,10 @@ def _fire_arc(w, pr, c, mult):
 	pl = w.player
 	n = c['count']
 	seen = set()
-	jumps = E['arc']['jumps'] + pr.rank // 3
+	# the CHAIN op never reached this emitter: chain_arc is called straight from
+	# here, so _hit -- where ops['chain'] is normally read -- is never involved,
+	# while CHAIN sits in its affinity list and THUNDER TRANSFORMER wants rank 4
+	jumps = E['arc']['jumps'] + pr.rank // 3 + pr.ops.get('chain', 0)
 	fired = 0
 	for i in range(n):
 		tg = nearest_n(w, pl.x, pl.y, 1, 460.0, seen)
@@ -650,7 +736,8 @@ def _fire_blade(w, pr, c, mult):
 		aa = a + (i - (n - 1) * 0.5) * (TAU / max(3, n + 1))
 		new_proj(w, 'blade', pl.x, pl.y, math.cos(aa) * c['speed'], math.sin(aa) * c['speed'],
 		         c['dmg'] * mult, c['col'], pr, r=c['size'], ttl=c['ttl'],
-		         pierce=E['blade']['pierce'], spin=13.0, f0=c['ttl'] * 0.34,
+		         pierce=E['blade']['pierce'], spin=13.0,
+		         f0=c['ttl'] * 0.34 * (1.0 + 0.30 * pr.ops.get('bounce', 0)),
 		         crit_c=_crit(c, pr), crit_m=c['crit_m'])
 	w.audio.play('fire_boom', 0.45, 0.07)
 
@@ -710,7 +797,7 @@ def _mk_strike(w, pr, c, x, y, rad, mult):
 		d = c['dmg'] * mult * (c['crit_m'] if crit else 1.0)
 		if pr.heat > 0: d *= 1.0 + pr.heat * pr.heat_dmg
 		w.fx.part('spark', x, y - 120, 0, 900, 0.18, 5.0, c['col'], 0.0)
-		explode(w, x, y, rad, d, c['col'], pr, 220.0, 0.05, None, crit)
+		explode(w, x, y, rad, d, c['col'], pr, 220.0, 0.05, None, crit, status=True)
 		bl = pr.ops.get('blast', 0)
 		if bl:
 			explode(w, x, y, rad * 0.6, d * 0.4, c['col'], pr, 120.0, 0.0, None, crit)
