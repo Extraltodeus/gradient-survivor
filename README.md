@@ -48,7 +48,8 @@ vectors and there is nothing to upscale.
 | in a run | |
 |---|---|
 | `ESC` or `P` | pause and inspect the build |
-| `T` | the evolution tree, from the pause screen |
+| `T` | spend a banked level — or open the evolution tree if none is waiting |
+| `O` | options, from the pause screen |
 | `TAB` | open the bench — sandbox runs only |
 | `Q` | quit to the menu, from the pause screen |
 
@@ -58,7 +59,13 @@ vectors and there is nothing to upscale.
 | `R` or the button | reroll the offers |
 | `X` or the button | banish one — it will not be offered again this run |
 | `T` or the button | open the full evolution tree |
-| `ESC` or the button | skip, and repair to full integrity instead |
+| the **SKIP** button | spend the level on a full repair instead |
+| `ESC` or **CLOSE** | leave, and keep the level for later |
+
+Levels stack. Take them one at a time and the screen deals a fresh hand after
+each pick; leave with `ESC` and the rest wait until you press `T`. Set
+**LEVEL-UP PROMPT** to *BANK IT* in the options and the fight is never
+interrupted at all.
 
 | display | |
 |---|---|
@@ -68,6 +75,9 @@ vectors and there is nothing to upscale.
 | `F4` | scanlines and vignette |
 | `F3` | fps counter |
 | `M` | mute |
+
+All of these also live in **OPTIONS** — on the title screen, or one key from the
+pause screen — and every one is written back to `save.json` as you change it.
 
 ---
 
@@ -240,10 +250,25 @@ is about 1%; two extreme op stacks on area emitters are off by ~3x.
 
 ---
 
+## Nothing is hidden in a config file
+
+`O` from the pause screen, or **OPTIONS** on the title. Every toggle says what it
+is for and what it costs, carries the function key it has always had, and is
+written back to `save.json` the moment you change it.
+
+The first row is the one that changes how the game plays: **LEVEL-UP PROMPT** set
+to *BANK IT* means a new level never interrupts the fight. It stacks in the corner
+until you press `T`, and then the screen deals you one hand per banked level until
+you run out or press `ESC` — which keeps whatever is left.
+
+![The options screen](docs/options.png)
+
+---
+
 ## The tree
 
-`T` from the pause screen, `T` on the level-up screen, or the last page of the
-codex. Every emitter on the left, everything it can crystallise into on the
+`T` from the field or the pause screen, `T` on the level-up screen, or the last
+page of the codex. Every emitter on the left, everything it can crystallise into on the
 right, the recipe for each, how far the process you are running has got along it,
 and the evolution playing live in the panel beside it.
 

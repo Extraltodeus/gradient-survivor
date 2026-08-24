@@ -45,6 +45,45 @@ from core.pace import PACES, DEFAULT_PACE
 LVL_DELAY = 1.0     # let the level-up burst finish before the cards take the screen
 
 
+
+# Everything the player is allowed to turn off, in one table: the pause screen
+# renders it, the save file stores it, and the old function keys still work.
+# `vals` holds the real values, `labels` what the option screen shows.
+OPTIONS = (
+	dict(id='defer', name='LEVEL-UP PROMPT', key='',
+	     vals=(False, True), labels=('INTERRUPT', 'BANK IT'),
+	     desc='Whether a new level stops the fight at once, or waits for you to press T.'),
+	dict(id='shake', name='SCREENSHAKE', key='F6',
+	     vals=(1.0, 0.5, 0.0), labels=('FULL', 'LIGHT', 'OFF'),
+	     desc='Camera trauma on hits and explosions. Late waves shake more than they settle.'),
+	dict(id='bloom', name='BLOOM', key='F2',
+	     vals=(True, False), labels=('ON', 'OFF'),
+	     desc='Additive glow pass. Costs 5-12 ms, and drops itself if the framerate slips.'),
+	dict(id='overlay', name='SCANLINES', key='F4',
+	     vals=(True, False), labels=('ON', 'OFF'),
+	     desc='Vignette and CRT lines over the play field. Free, purely a look.'),
+	dict(id='dmgnum', name='DAMAGE NUMBERS', key='',
+	     vals=(True, False), labels=('ON', 'OFF'),
+	     desc='Floating numbers on every hit. Off is calmer and slightly faster in dense waves.'),
+	dict(id='mouse_mode', name='MOUSE STEERING', key='F5',
+	     vals=('pointer', 'joystick'), labels=('POINTER', 'DRAG STICK'),
+	     desc='Held left button steers toward the cursor, or from wherever you pressed down.'),
+	dict(id='fullscreen', name='FULLSCREEN', key='F11',
+	     vals=(False, True), labels=('WINDOWED', 'FULLSCREEN'),
+	     desc='The game renders at your display resolution either way, so neither is blurrier.'),
+	dict(id='mute', name='AUDIO', key='M',
+	     vals=(False, True), labels=('ON', 'MUTED'),
+	     desc='All sound is synthesised at boot: muting frees nothing, it is only quiet.'),
+	dict(id='show_fps', name='FPS COUNTER', key='F3',
+	     vals=(False, True), labels=('OFF', 'ON'),
+	     desc='Framerate plus live enemy, projectile and particle counts, bottom right.'),
+)
+
+OPT_BY_ID = {o['id']: o for o in OPTIONS}
+
+KEY_OPT = {pygame.K_F2: 'bloom', pygame.K_F3: 'show_fps', pygame.K_F4: 'overlay',
+           pygame.K_F5: 'mouse_mode', pygame.K_F6: 'shake', pygame.K_m: 'mute'}
+
 def ui_pages():
 	from game.ui import CODEX_PAGES
 	return CODEX_PAGES
@@ -152,7 +191,7 @@ class Game:
 		self.scene = 'title'
 		self.t = 0.0
 		self.sel = 0
-		self.menu = ['START RUN', 'SANDBOX', 'CODEX', 'QUIT']
+		self.menu = ['START RUN', 'SANDBOX', 'CODEX', 'OPTIONS', 'QUIT']
 		self.codex_page = 0
 		self.boot_sel = self.save.get('boot_sel', 0)
 		self.pace_sel = _pace_index(self.save.get('pace'))
@@ -166,10 +205,17 @@ class Game:
 		self.lvl_wait = 0.0
 		self.tree_scroll = 0
 		self.tree_max = 0
+		self.tree_back = 'pause'
 		self.end_t = 0.0
 		self.fps_acc = 0.0
 		self.fps_n = 0
-		self.show_fps = False
+		self.show_fps = bool(self.save.get('show_fps', False))
+		self.opt_sel = 0
+		self.opt_rects = []
+		self.pause_btns = []
+		self.opt_btns = []
+		self.lvl_hold = False
+		self.lvl_last = 0
 		self.mouse_mode = self.save.get('mouse_mode', 'pointer')
 		self.mouse_held = False
 		self.mouse_anchor = None
@@ -177,8 +223,12 @@ class Game:
 		self.mouse_last = (CX, CY)
 		# Bloom is a full-screen additive pass: ~12 ms at 1080p, ~5 ms at 720p. We
 		# render natively for a crisp fullscreen, so on big displays it starts off.
-		self.opts = {'dmgnum': True, 'shake': float(self.save.get('shake', 1.0)),
-		             'quality': 1.0, 'overlay': True, 'bloom': W * H <= 1500000}
+		self.opts = {'dmgnum': bool(self.save.get('dmgnum', True)),
+		             'shake': float(self.save.get('shake', 1.0)),
+		             'quality': 1.0,
+		             'defer': bool(self.save.get('defer', False)),
+		             'overlay': bool(self.save.get('overlay', True)),
+		             'bloom': bool(self.save.get('bloom', W * H <= 1500000))}
 		self.slow_frames = 0
 
 	def _flags(self):
@@ -194,6 +244,44 @@ class Game:
 			self.screen = pygame.display.set_mode((W, H), self._flags(), vsync=0)
 		self.save['fullscreen'] = self.fullscreen
 		save_data(self.save)
+
+	# --------------------------------------------------------------- options
+	def opt_get(self, o):
+		"""Which of the option's values is live right now, as an index."""
+		i = o['id']
+		if i == 'mouse_mode': v = self.mouse_mode
+		elif i == 'fullscreen': v = self.fullscreen
+		elif i == 'mute': v = self.audio.muted
+		elif i == 'show_fps': v = self.show_fps
+		else: v = self.opts.get(i)
+		try:
+			return list(o['vals']).index(v)
+		except ValueError:
+			return 0
+
+	def opt_cycle(self, o, d=1):
+		v = o['vals'][(self.opt_get(o) + d) % len(o['vals'])]
+		i = o['id']
+		if i == 'mouse_mode': self.mouse_mode = v
+		elif i == 'fullscreen':
+			if v != self.fullscreen: self.toggle_fullscreen()
+		elif i == 'mute':
+			if v != self.audio.muted: self.audio.toggle_mute()
+		elif i == 'show_fps': self.show_fps = v
+		else:
+			self.opts[i] = v
+			if i == 'bloom': self.slow_frames = 0
+		self.persist_opts()
+		return v
+
+	def persist_opts(self):
+		for o in OPTIONS:
+			self.save[o['id']] = o['vals'][self.opt_get(o)]
+		save_data(self.save)
+
+	def opt_rows(self):
+		return [(o['name'], o['key'], o['labels'][self.opt_get(o)], o['desc'],
+		         self.opt_get(o), len(o['vals'])) for o in OPTIONS]
 
 	def mouse_vec(self):
 		"""Movement vector from the mouse, magnitude 0..1, or None when idle."""
@@ -255,48 +343,16 @@ class Game:
 		for ev in pygame.event.get():
 			if ev.type == pygame.QUIT: return False
 			if ev.type == pygame.KEYDOWN:
-				if ev.key == pygame.K_m:
-					m = self.audio.toggle_mute()
-					self.save['mute'] = m
-					continue
-				if ev.key == pygame.K_F3:
-					self.show_fps = not self.show_fps
-					continue
-				if ev.key == pygame.K_F2:
-					self.opts['bloom'] = not self.opts['bloom']
-					self.slow_frames = 0
+				hot = KEY_OPT.get(ev.key)
+				if hot:
+					o = OPT_BY_ID[hot]
+					self.opt_cycle(o)
 					if self.world:
-						self.world.banner('BLOOM ' + ('ON' if self.opts['bloom'] else 'OFF'),
-						                  'F2 toggles - costs ~%d ms/frame' % (12 if W * H > 1500000 else 5),
-						                  CYAN)
-					continue
-				if ev.key == pygame.K_F4:
-					self.opts['overlay'] = not self.opts['overlay']
-					continue
-				if ev.key == pygame.K_F6:
-					# Late game triggers shake faster than the trauma decays, so the
-					# frame never settles. The amplitude was always a knob, it just
-					# had no key; it takes the glitch jitter down with it.
-					steps = (1.0, 0.5, 0.0)
-					cur = self.opts.get('shake', 1.0)
-					i = min(range(3), key=lambda k: abs(steps[k] - cur))
-					v = steps[(i + 1) % 3]
-					self.opts['shake'] = v
-					self.save['shake'] = v
-					save_data(self.save)
-					if self.world:
-						lbl = 'OFF' if v <= 0.0 else ('LIGHT' if v < 1.0 else 'FULL')
-						self.world.banner('SCREENSHAKE ' + lbl, 'F6 cycles full / light / off', CYAN)
+						self.world.banner('%s  %s' % (o['name'], o['labels'][self.opt_get(o)]),
+						                  o['desc'], CYAN)
 					continue
 				if ev.key == pygame.K_F11 or (ev.key == pygame.K_RETURN and (ev.mod & pygame.KMOD_ALT)):
 					self.toggle_fullscreen()
-					continue
-				if ev.key == pygame.K_F5:
-					self.mouse_mode = 'joystick' if self.mouse_mode == 'pointer' else 'pointer'
-					self.save['mouse_mode'] = self.mouse_mode
-					if self.world:
-						self.world.banner('MOUSE: ' + self.mouse_mode.upper(),
-						                  'hold left button to steer', CYAN)
 					continue
 			if ev.type == pygame.MOUSEMOTION:
 				self.mouse_last = ev.pos
@@ -314,6 +370,7 @@ class Game:
 						if m == 'START RUN': self.scene = 'select'
 						elif m == 'SANDBOX': self.start(sandbox=True)
 						elif m == 'CODEX': self.scene = 'codex'; self.codex_scroll = 0
+						elif m == 'OPTIONS': self.scene = 'options'
 						else: return False
 					elif ev.key == pygame.K_ESCAPE:
 						return False
@@ -375,6 +432,12 @@ class Game:
 				if ev.type == pygame.KEYDOWN:
 					if ev.key == pygame.K_TAB and self.sandbox is not None:
 						self.scene = 'sandbox'; self.mouse_held = False
+					elif ev.key == pygame.K_t:
+						if self.world.player.banked > 0:
+							self.open_levelup()
+						else:
+							self.scene = 'tree'; self.tree_scroll = 0
+							self.tree_back = 'play'; self.mouse_held = False
 					elif ev.key == pygame.K_ESCAPE or ev.key == pygame.K_p:
 						self.scene = 'pause'
 					elif ev.key == pygame.K_SPACE:
@@ -398,22 +461,55 @@ class Game:
 			elif self.scene == 'pause':
 				self.mouse_held = False
 				if ev.type == pygame.KEYDOWN:
-					if ev.key in (pygame.K_ESCAPE, pygame.K_p): self.scene = 'play'
-					elif ev.key == pygame.K_t:
-						self.scene = 'tree'; self.tree_scroll = 0
-					elif ev.key == pygame.K_q:
-						self.scene = 'title'; self.world = None; self.sandbox = None
+					if ev.key in (pygame.K_ESCAPE, pygame.K_p): self.pause_do('resume')
+					elif ev.key == pygame.K_t: self.pause_do('tree')
+					elif ev.key == pygame.K_o: self.pause_do('options')
+					elif ev.key == pygame.K_q: self.pause_do('quit')
+				elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+					for r, key, on in self.pause_btns:
+						if on and r.collidepoint(ev.pos):
+							self.audio.play('pick', 0.8); self.pause_do(key); break
+
+			elif self.scene == 'options':
+				self.mouse_held = False
+				n = len(OPTIONS)
+				if ev.type == pygame.KEYDOWN:
+					if ev.key in (pygame.K_ESCAPE, pygame.K_o, pygame.K_RETURN):
+						self.scene = 'pause' if self.world else 'title'
+					elif ev.key in (pygame.K_DOWN, pygame.K_s):
+						self.opt_sel = (self.opt_sel + 1) % n; self.audio.play('move', 0.6)
+					elif ev.key in (pygame.K_UP, pygame.K_w):
+						self.opt_sel = (self.opt_sel - 1) % n; self.audio.play('move', 0.6)
+					elif ev.key in (pygame.K_RIGHT, pygame.K_d, pygame.K_SPACE):
+						self.opt_cycle(OPTIONS[self.opt_sel]); self.audio.play('gem', 0.7)
+					elif ev.key in (pygame.K_LEFT, pygame.K_a):
+						self.opt_cycle(OPTIONS[self.opt_sel], -1); self.audio.play('gem', 0.7)
+				elif ev.type == pygame.MOUSEMOTION:
+					for i, r in enumerate(self.opt_rects):
+						if r.collidepoint(ev.pos): self.opt_sel = i
+				elif ev.type == pygame.MOUSEWHEEL and ev.y:
+					self.opt_sel = (self.opt_sel - ev.y) % n
+				elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button in (1, 3):
+					for r, key, on in self.opt_btns:
+						if r.collidepoint(ev.pos):
+							self.scene = 'pause' if self.world else 'title'; break
+					else:
+						for i, r in enumerate(self.opt_rects):
+							if r.collidepoint(ev.pos):
+								self.opt_sel = i
+								self.opt_cycle(OPTIONS[i], 1 if ev.button == 1 else -1)
+								self.audio.play('gem', 0.7); break
 
 			elif self.scene == 'tree':
 				self.mouse_held = False
 				if ev.type == pygame.KEYDOWN:
-					if ev.key in (pygame.K_ESCAPE, pygame.K_t, pygame.K_TAB): self.scene = 'pause'
+					if ev.key in (pygame.K_ESCAPE, pygame.K_t, pygame.K_TAB): self.scene = self.tree_back
 					elif ev.key in (pygame.K_DOWN, pygame.K_s): self.tree_scroll += 70
 					elif ev.key in (pygame.K_UP, pygame.K_w): self.tree_scroll -= 70
 				elif ev.type == pygame.MOUSEWHEEL:
 					self.tree_scroll -= ev.y * 60
 				elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 3:
-					self.scene = 'pause'
+					self.scene = self.tree_back
 				self.tree_scroll = max(0, min(self.tree_scroll, self.tree_max))
 
 			elif self.scene == 'levelup':
@@ -448,22 +544,30 @@ class Game:
 					self.slow_frames = max(0, self.slow_frames - 1)
 			if w.player.dead:
 				self.end_run(False)
-			elif w.player.banked > 0 and w.fx.hitstop <= 0 and not w.folding():
-				# a biome fold owns the screen for 1.5s: let it finish before the
-				# upgrade screen takes over, and give the level-up burst itself a
-				# second to play out instead of being cut off by its own reward
-				self.lvl_wait -= dt
-				if self.lvl_wait <= 0.0:
-					self.open_levelup()
 			else:
-				self.lvl_wait = LVL_DELAY
+				# a fresh level always re-arms the prompt, even if the last one was
+				# dismissed: the point is new, so the offer to spend it is too
+				if w.player.banked > self.lvl_last: self.lvl_hold = False
+				self.lvl_last = w.player.banked
+				ready = (w.player.banked > 0 and w.fx.hitstop <= 0 and not w.folding()
+				         and not self.lvl_hold and not self.opts.get('defer'))
+				if ready:
+					# a biome fold owns the screen for 1.5s: let it finish before the
+					# upgrade screen takes over, and give the level-up burst itself a
+					# second to play out instead of being cut off by its own reward
+					self.lvl_wait -= dt
+					if self.lvl_wait <= 0.0:
+						self.open_levelup()
+				else:
+					self.lvl_wait = LVL_DELAY
 		elif self.scene == 'levelup':
 			self.levelup.update(dt)
 			if self.levelup.done:
-				self.world.player.banked -= 1
 				self.levelup = None
 				self.scene = 'play'
 				self.lvl_wait = LVL_DELAY
+				self.lvl_hold = self.world.player.banked > 0
+				self.lvl_last = self.world.player.banked
 		elif self.scene == 'sandbox':
 			self.sandbox.update(dt)
 			self.world.fx.update(dt)
@@ -471,8 +575,16 @@ class Game:
 		elif self.scene == 'end':
 			self.end_t += dt
 			self.audio.update(dt, 0.0)
-		elif self.scene in ('title', 'codex', 'select'):
+		elif self.scene in ('title', 'codex', 'select', 'options'):
 			self.audio.update(dt, 0.0)
+
+	def pause_do(self, key):
+		if key == 'resume': self.scene = 'play'
+		elif key == 'tree': self.scene = 'tree'; self.tree_scroll = 0; self.tree_back = 'pause'
+		elif key == 'options': self.scene = 'options'
+		elif key == 'quit':
+			self.scene = 'title'; self.world = None; self.sandbox = None
+			self.levelup = None; self.lvl_hold = False
 
 	def open_levelup(self):
 		from game.offers import build_offers
@@ -482,6 +594,8 @@ class Game:
 		self.levelup = LevelUp(w, offers)
 		self.levelup.snapshot(self.screen)
 		self.scene = 'levelup'
+		self.lvl_hold = False
+		self.lvl_last = w.player.banked
 		self.lvl_wait = LVL_DELAY
 		self.audio.play('levelup', 0.8)
 
@@ -535,12 +649,21 @@ class Game:
 			if self.scene == 'play':
 				ui.draw_cursor(s, self.world, self.mouse_last[0], self.mouse_last[1],
 				               self.mouse_held, self.mouse_mode, self.mouse_anchor, self.mouse_fade)
-			if self.scene == 'pause': ui.draw_pause(self.world, s)
+			if self.scene == 'pause':
+				self.pause_btns = ui.draw_pause(self.world, s, pygame.mouse.get_pos())
 			elif self.scene == 'sandbox': self.sandbox.draw(s, self.world)
 			elif self.scene == 'end':
 				ui.draw_end(self.world, s, self.end_t, self.world.win, self.save.get('scores'))
 		elif self.scene == 'levelup':
 			self.levelup.draw(s, self.world)
+		if self.scene == 'options':
+			if self.world:
+				self.world.draw(s)
+				if self.opts['overlay']: s.blit(self.overlay, (0, 0))
+			else:
+				ui.draw_title(s, self.t, self.sel, self.menu, self.save.get('best'))
+			self.opt_rects, self.opt_btns = ui.draw_options(s, self.opt_rows(), self.opt_sel,
+			                                                pygame.mouse.get_pos())
 		if self.scene in ('play',) and self.opts['overlay']:
 			pass
 		if self.show_fps:

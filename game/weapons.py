@@ -657,7 +657,7 @@ def _fire_aura(w, pr, c, mult):
 
 def _fire_nova(w, pr, c, mult):
 	pl = w.player
-	for i in range(max(1, c['count'] // 2)):
+	for i in range(max(1, min(6, int(c['count'])))):
 		new_proj(w, 'wave', pl.x, pl.y, 0, 0, c['dmg'] * mult, c['col'], pr,
 		         r=10.0, ttl=c['ttl'] + 0.1 * i, follow=True, owner=pl,
 		         f0=14.0, f1=c['size'] * w.player.area_mult * (1.0 + 0.12 * i),
@@ -668,7 +668,7 @@ def _fire_nova(w, pr, c, mult):
 
 def _fire_beam(w, pr, c, mult):
 	em = E['beam']
-	n = max(1, min(6, c['count'] // 2))
+	n = max(1, min(6, int(c['count'])))
 	L = em['length'] * (1.0 + 0.10 * (pr.rank - 1)) * w.player.area_mult * (1.0 + 0.22 * pr.ops.get('giant', 0))
 	spd = em['speed'] * (1.0 + 0.08 * pr.ops.get('swift', 0)) * (1.0 if w.rng.random() < 0.5 else -1.0)
 	for i in range(n):
@@ -717,7 +717,7 @@ def _fire_arc(w, pr, c, mult):
 def _fire_turret(w, pr, c, mult):
 	pl = w.player
 	rate = E['turret']['rate'] / (1.0 + 0.10 * (pr.rank - 1) + 0.16 * pr.ops.get('swift', 0))
-	n = max(1, c['count'] // 2)
+	n = max(1, min(6, int(c['count'])))
 	for i in range(n):
 		a = w.rng.random() * TAU
 		d = 40.0 + w.rng.random() * 60.0

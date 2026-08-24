@@ -15,16 +15,14 @@ CONTROLS = (
 	('hold LMB', 'move toward cursor'),
 	('SPACE / RMB', 'dash or blink'),
 	('ESC or P', 'pause / this screen'),
+	('T', 'tree, or spend a level'),
 	('1-5 or click', 'pick an upgrade'),
-	('R / X / ESC', 'reroll / banish / skip'),
-	('T', 'the evolution tree'),
+	('R / X', 'reroll / banish an offer'),
+	('ESC (level-up)', 'leave it, keep the point'),
+	('O (paused)', 'options'),
 	('TAB (sandbox)', 'open the bench'),
 	('F11 or Alt+Enter', 'fullscreen'),
-	('F5', 'mouse mode: pointer or drag'),
-	('F2 / F4', 'bloom / scanlines'),
-	('F6', 'screenshake: full / light / off'),
-	('F3', 'fps counter'),
-	('M', 'mute'),
+	('M / F3', 'mute / fps counter'),
 	('Q', 'quit to menu'),
 )
 
@@ -42,6 +40,28 @@ def fit(dst, txt, x, y, size, col, bold, width, anchor='tl', floor=9):
 	while size > floor and text_w(txt, size, bold) > width:
 		size -= 1
 	return draw_text(dst, txt, x, y, size, col, bold, anchor)
+
+
+
+def button_row(s, defs, y, mouse, maxw=214, bh=40):
+	"""One row of clickable verbs, centred. defs: (key, label, sub, col, enabled).
+	Returns [(rect, key, enabled)] so the caller can route the click."""
+	g = 12
+	n = max(1, len(defs))
+	bw = int(min(maxw, (W - 60 - (n - 1) * g) / n))
+	x = CX - (n * bw + (n - 1) * g) * 0.5
+	out = []
+	for key, lbl, sub, col, on in defs:
+		r = pygame.Rect(int(x), int(y), bw, bh)
+		hot = r.collidepoint(mouse) and on
+		c = col if on else INK_FAINT
+		pygame.draw.rect(s, (24, 29, 42) if hot else (14, 18, 27), r, 0, 7)
+		pygame.draw.rect(s, c if hot else shade(c, 0.55), r, 2 if hot else 1, 7)
+		fit(s, lbl, r.x + 12, r.y + 4, 14, c, True, bw - 22)
+		fit(s, sub, r.x + 12, r.y + 22, 10, INK_FAINT, False, bw - 22)
+		out.append((r, key, on))
+		x += bw + g
+	return out
 
 
 def pips(s, x, y, cur, mx, col, size=7, gap=4):
@@ -573,7 +593,7 @@ def _weapon_scene(s, rect, emit, col, t, ops=None, st=None, shape='dart', pcol=C
 		for q in foes:
 			if math.hypot(q[0] - ax, q[1] - ay) < r: q[2] = True
 	elif emit == 'nova':
-		for k in range(max(1, n // 2)):
+		for k in range(max(1, min(6, n))):
 			pk = (ph + k * 0.18) % 1.0
 			r = pk * max(rx, ry) * 1.6 * szf
 			pygame.draw.circle(s, shade(col, 1.0 - pk), (int(ax), int(ay)), int(r) + 1, 3)
@@ -581,7 +601,7 @@ def _weapon_scene(s, rect, emit, col, t, ops=None, st=None, shape='dart', pcol=C
 			for q in foes:
 				if math.hypot(q[0] - ax, q[1] - ay) < r: q[2] = True
 	elif emit == 'beam':
-		nb = max(1, min(4, n // 2))
+		nb = max(1, min(6, n))
 		L = max(rx, ry) * 1.7 * szf
 		for k in range(nb):
 			a = t * 1.3 + k * TAU / nb
@@ -619,7 +639,7 @@ def _weapon_scene(s, rect, emit, col, t, ops=None, st=None, shape='dart', pcol=C
 			q[2] = True
 			prev = (q[0], q[1])
 	elif emit == 'turret':
-		nt = max(2, min(4, n))
+		nt = max(1, min(6, n))
 		for k in range(nt):
 			a = k * TAU / nt + 0.6
 			tx = ax + math.cos(a) * w_ * 0.17; ty = ay + math.sin(a) * h_ * 0.24
@@ -880,7 +900,7 @@ def draw_hud(w, s):
 
 	# ---- rerolls / banish
 	if pl.banked:
-		draw_text(s, '%d upgrade%s pending' % (pl.banked, 's' if pl.banked > 1 else ''),
+		draw_text(s, '%d upgrade%s pending  -  press T' % (pl.banked, 's' if pl.banked > 1 else ''),
 		          CX, H - 26, 14, GOLD, True, 'tc')
 
 	# ---- boss bar
@@ -1051,6 +1071,9 @@ class LevelUp:
 				self.sel = (self.sel + 1) % n; w.audio.play('move', 0.6)
 			elif ev.key == pygame.K_t:
 				self.tree = True; self.tree_scroll = 0
+			elif ev.key == pygame.K_ESCAPE:
+				# leaving takes nothing, so the anti-misclick lock has nothing to guard
+				self.close(w)
 			elif not live:
 				return
 			elif ev.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_e):
@@ -1062,8 +1085,6 @@ class LevelUp:
 				self.reroll(w)
 			elif ev.key == pygame.K_x:
 				self.banish(w)
-			elif ev.key in (pygame.K_TAB, pygame.K_ESCAPE):
-				self.skip(w)
 		elif ev.type == pygame.MOUSEWHEEL and ev.y:
 			self.sel = (self.sel - ev.y) % len(self.offers)
 			w.audio.play('move', 0.5)
@@ -1073,11 +1094,13 @@ class LevelUp:
 					if self.sel != i: w.audio.play('move', 0.4)
 					self.sel = i
 		elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-			for r, key, _l, _s, _c, on in self.buttons:
+			for r, key, on in self.buttons:
 				if r.collidepoint(ev.pos):
 					if key == 'tree':
 						self.tree = True; self.tree_scroll = 0
 						w.audio.play('move', 0.7); return
+					if key == 'close':
+						self.close(w); return
 					if not live or not on:
 						w.audio.play('deny', 0.7); return
 					{'reroll': self.reroll, 'banish': self.banish, 'skip': self.skip}[key](w)
@@ -1092,7 +1115,25 @@ class LevelUp:
 		o.apply()
 		w.audio.play('pick', 1.0)
 		w.audio.play('levelup', 0.7)
-		self.done = 'picked'
+		self.spend(w, 'picked')
+
+	def spend(self, w, why):
+		"""A point is gone. If more are banked the screen stays up and deals a
+		fresh hand, with the anti-misclick lock re-armed so one held click cannot
+		burn two levels."""
+		w.player.banked = max(0, w.player.banked - 1)
+		if w.player.banked <= 0:
+			self.done = why
+			return
+		from game.offers import build_offers
+		self.offers = build_offers(w, len(self.offers), set().union(*self.avoid) if self.avoid else None)
+		self.sel = clamp(self.sel, 0, len(self.offers) - 1)
+		self.t = 0.0
+
+	def close(self, w):
+		"""Leave without spending anything: the banked levels wait for T."""
+		w.audio.play('move', 0.7)
+		self.done = 'left'
 
 	def reroll(self, w):
 		if w.player.rerolls <= 0:
@@ -1120,7 +1161,7 @@ class LevelUp:
 	def skip(self, w):
 		w.player.heal(w.player.maxhp)
 		w.audio.play('pick', 0.6)
-		self.done = 'skipped'
+		self.spend(w, 'skipped')
 
 	def update(self, dt):
 		self.t += dt
@@ -1144,7 +1185,7 @@ class LevelUp:
 		cw = int(min(322, (W - 56 - (n - 1) * gap) / n))
 		fy = H - 52
 		pvh = int(clamp(H * 0.36, 196, 330))
-		pvy = fy - pvh - 12
+		pvy = fy - pvh - 26
 		cy = 92
 		ch = int(clamp(pvy - cy - 12, 210, 430))
 		x0 = CX - (n * cw + (n - 1) * gap) * 0.5
@@ -1170,24 +1211,20 @@ class LevelUp:
 		"""Reroll used to be a keyboard-only verb, which made the most common
 		action on this screen the one you had to leave the mouse for."""
 		pl = w.player
-		self.buttons = []
+		left = max(0, pl.banked - 1)
 		defs = [('reroll', 'REROLL', 'R  -  %d left' % pl.rerolls, GOLD, pl.rerolls > 0),
 		        ('banish', 'BANISH', 'X  -  %d left' % pl.banishes, VIOLET, pl.banishes > 0),
-		        ('skip', 'SKIP', 'ESC  -  full repair', HP_COL, True),
-		        ('tree', 'TREE', 'T  -  every evolution', CYAN, True)]
-		bw = 208; bh = 38; g = 12
-		x = CX - (len(defs) * bw + (len(defs) - 1) * g) * 0.5
-		for key, lbl, sub, col, on in defs:
-			r = pygame.Rect(int(x), int(y), bw, bh)
-			self.buttons.append((r, key, lbl, sub, col, on))
-			live = on and (not locked or key == 'tree')
-			hot = r.collidepoint(mouse) and live
-			c = col if live else INK_FAINT
-			pygame.draw.rect(s, (24, 29, 42) if hot else (14, 18, 27), r, 0, 7)
-			pygame.draw.rect(s, c if hot else shade(c, 0.55), r, 2 if hot else 1, 7)
-			draw_text(s, lbl, r.x + 14, r.y + 6, 15, c, True)
-			draw_text(s, sub, r.right - 14, r.y + 10, 11, INK_FAINT, False, 'tr')
-			x += bw + g
+		        ('skip', 'SKIP', 'spend it on a full repair', HP_COL, True),
+		        ('tree', 'TREE', 'T  -  every evolution', CYAN, True),
+		        ('close', 'CLOSE', 'ESC  -  keep %d point%s' % (pl.banked, '' if pl.banked == 1 else 's'),
+		         INK_DIM, True)]
+		# TREE and CLOSE take nothing away, so the anti-misclick lock skips them
+		defs = [(k, l, sub, c, on and (not locked or k in ('tree', 'close')))
+		        for k, l, sub, c, on in defs]
+		self.buttons = button_row(s, defs, y, mouse)
+		if left:
+			draw_text(s, '%d more level%s banked after this one' % (left, '' if left == 1 else 's'),
+			          CX, y - 20, 11, GOLD, True, 'tc')
 
 	# ------------------------------------------------------------------ cards
 	def draw_card(self, s, o, r, sel, e, i, n):
@@ -1601,18 +1638,18 @@ def draw_tree_screen(s, t, scroll, mouse, w=None, overlay=False):
 		my_ += 14
 	return max(0, y + scroll - bot + 40)
 # ================================================================= PAUSE
-def draw_pause(w, s, tab=0):
+def draw_pause(w, s, mouse=(0, 0)):
 	o = pygame.Surface((W, H), pygame.SRCALPHA)
 	o.fill((5, 7, 12, 225))
 	s.blit(o, (0, 0))
 	pl = w.player
 	draw_text(s, 'SUSPENDED', CX, 26, 30, INK, True, 'tc')
-	draw_text(s, 'ESC resume   -   T evolution tree   -   Q quit to menu', CX, 62, 13, INK_DIM, False, 'tc')
+	draw_text(s, 'nothing moves while you read', CX, 62, 13, INK_FAINT, False, 'tc')
 
 	# ---- left: processes
 	LW = int(W * 0.50)
 	x = 40; y = 96
-	panel(s, (x - 12, y - 12, LW, H - y - 40), 170)
+	panel(s, (x - 12, y - 12, LW, H - y - 92), 170)
 	tot = w.arsenal.total_power(pl)
 	draw_text(s, 'ACTIVE PROCESSES  %d/%d' % (len(w.arsenal.procs), w.arsenal.slots),
 	          x, y, 14, INK, True)
@@ -1661,7 +1698,7 @@ def draw_pause(w, s, tab=0):
 	# ---- right: stats
 	x = 40 + LW + 24; y = 96
 	RW = W - x - 28
-	panel(s, (x - 12, y - 12, RW, H - y - 40), 170)
+	panel(s, (x - 12, y - 12, RW, H - y - 92), 170)
 	draw_text(s, 'SYSTEM', x, y, 14, INK, True)
 	y += 26
 	rows = [
@@ -1699,11 +1736,87 @@ def draw_pause(w, s, tab=0):
 
 	y += 14
 	pygame.draw.line(s, (26, 32, 46), (x, y - 6), (x + RW - 36, y - 6))
-	draw_text(s, 'CONTROLS', x, y, 14, INK, True); y += 22
+	draw_text(s, 'CONTROLS', x, y, 14, INK, True)
+	# two columns on a wide panel, one on a narrow one, and whatever still does not
+	# fit is dropped whole rather than squeezed into unreadable type -- the full
+	# list lives on the options screen either way
+	bot = H - 112
+	y += 22
+	cols = 2 if RW >= 620 else 1
+	cw = (RW - 36) / cols
+	per = -(-len(CONTROLS) // cols)
+	shown = 0
+	for i, (k, v) in enumerate(CONTROLS):
+		cy = y + (i % per) * 17
+		if cy + 17 > bot: continue
+		cx = x + (i // per) * cw
+		fit(s, k, cx, cy, 12, CYAN, True, cw * 0.42)
+		fit(s, v, cx + cw * 0.44, cy, 12, INK_DIM, False, cw * 0.56)
+		shown += 1
+	y += min(per, max(1, (bot - y) // 17)) * 17
+	if shown < len(CONTROLS):
+		draw_text(s, '+%d more  -  press O for the full list' % (len(CONTROLS) - shown),
+		          x, y, 12, INK_FAINT)
+
+	return button_row(s, [('resume', 'RESUME', 'ESC or P', CYAN, True),
+	                      ('tree', 'EVOLUTION TREE', 'T  -  what fuses into what', VIOLET, True),
+	                      ('options', 'OPTIONS', 'O  -  display, audio, level-ups', GOLD, True),
+	                      ('quit', 'QUIT TO MENU', 'Q  -  the run is lost', RED, True)],
+	                  H - 58, mouse)
+
+
+OPT_ROW_H = 46
+
+
+def draw_options(s, rows, sel, mouse):
+	"""rows: (name, hotkey, value, desc, index, n_values). Left click on a row
+	takes the next value, right click the previous one -- no truncation, every
+	option says what it costs you."""
+	o = pygame.Surface((W, H), pygame.SRCALPHA)
+	o.fill((5, 7, 12, 238))
+	s.blit(o, (0, 0))
+	draw_text(s, 'OPTIONS', CX, 26, 30, INK, True, 'tc')
+	draw_text(s, 'left click or RIGHT arrow for the next value, right click or LEFT for the previous',
+	          CX, 62, 12, INK_FAINT, False, 'tc')
+
+	tw = int(min(1180, W - 60))
+	pw = int(tw * 0.66)
+	kw = tw - pw - 16
+	px = CX - tw * 0.5
+	ph = len(rows) * OPT_ROW_H + 20
+	py = int(clamp((H - ph) * 0.5, 92, 190))
+	panel(s, (px, py, pw, ph), 190)
+	out = []
+	vw = int(pw * 0.26)
+	for i, (name, hot, val, desc, vi, vn) in enumerate(rows):
+		r = pygame.Rect(int(px) + 8, int(py) + 10 + i * OPT_ROW_H, pw - 16, OPT_ROW_H - 4)
+		on = i == sel or r.collidepoint(mouse)
+		if on:
+			pygame.draw.rect(s, (20, 25, 37), r, 0, 6)
+			pygame.draw.rect(s, shade(CYAN, 0.55), r, 1, 6)
+		fit(s, name, r.x + 12, r.y + 5, 14, INK if on else INK_DIM, True, pw - vw - 70)
+		fit(s, desc, r.x + 12, r.y + 24, 11, INK_FAINT, False, pw - vw - 70, floor=10)
+		vr = pygame.Rect(r.right - 14 - vw, r.y + 6, vw, 24)
+		pygame.draw.rect(s, (14, 18, 27), vr, 0, 5)
+		pygame.draw.rect(s, shade(GOLD if on else INK_FAINT, 0.8), vr, 1, 5)
+		pips(s, vr.x + 9, vr.y + 9, vi + 1, vn, shade(GOLD, 0.9), 4, 3)
+		fit(s, val, vr.x + 36 + (vw - 48) * 0.5, vr.y + 5, 13,
+		    GOLD if on else INK_DIM, True, vw - 50, 'tc')
+		if hot:
+			fit(s, hot, vr.centerx, vr.bottom + 3, 10, shade(CYAN, 0.8), True, vw, 'tc')
+		out.append(r)
+
+	kx = int(px) + pw + 16
+	panel(s, (kx, py, kw, ph), 190)
+	draw_text(s, 'CONTROLS', kx + 14, py + 12, 14, INK, True)
+	ky = py + 40
 	for k, v in CONTROLS:
-		draw_text(s, k, x, y, 12, CYAN, True)
-		draw_text(s, v, x + 126, y, 12, INK_DIM)
-		y += 17
+		fit(s, k, kx + 14, ky, 12, CYAN, True, kw * 0.44)
+		fit(s, v, kx + 14 + kw * 0.46, ky, 12, INK_DIM, False, kw * 0.5)
+		ky += 17
+
+	btn = button_row(s, [('back', 'BACK', 'ESC  -  saved as you go', CYAN, True)], H - 58, mouse)
+	return out, btn
 
 
 # ================================================================== CODEX
